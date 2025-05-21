@@ -1,0 +1,42 @@
+import { FC, ComponentType } from 'react';
+
+export interface WidgetConfig {
+    apiKey: string;
+    theme?: 'light' | 'dark' | 'auto';
+    initialOpen?: boolean;
+    apiUrl?: string;
+    onEvent?: (eventName: string, data?: any) => void;
+}
+
+export interface WidgetProps {
+    config: WidgetConfig;
+    isOpen?: boolean;
+    content?: string;
+    onClose?: () => void;
+    onOpen?: () => void;
+    onSubmit?: (data: string) => void;
+}
+
+export interface WidgetState {
+    isOpen: boolean;
+    theme: 'light' | 'dark';
+    data: any | null;
+}
+
+export interface WidgetActions {
+    open: () => void;
+    close: () => void;
+    toggle: () => void;
+    submit: (data: string) => void;
+    setTheme: (theme: 'light' | 'dark') => void;
+    setText: (text: string) => void;
+    refresh: () => Promise<void>;
+}
+
+export interface UseWidgetResult {
+    WidgetComponent: ComponentType<{}>;
+    widgetState: WidgetState;
+    widgetActions: WidgetActions;
+    isLoading: boolean;
+    error: Error | null;
+}

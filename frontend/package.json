@@ -1,0 +1,42 @@
+{
+    "name": "heimdall-hook",
+    "version": "0.1.0",
+    "description": "A customizable widget hook for React applications",
+    "main": "dist/hmdl-widget.js",
+    "module": "dist/hmdl-widget.esm.js",
+    "types": "dist/hmdl-widget.d.ts",
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build && tsc --emitDeclarationOnly",
+        "lint": "eslint src --ext ts,tsx",
+        "test": "vitest run",
+        "prepare": "npm run build"
+    },
+    "peerDependencies": {
+        "react": "^18.0.0",
+        "react-dom": "^18.0.0"
+    },
+    "dependencies": {
+        "axios": "^1.4.0"
+    },
+    "devDependencies": {
+        "@types/node": "^18.15.11",
+        "@types/react": "^18.0.28",
+        "@types/react-dom": "^18.0.11",
+        "@typescript-eslint/eslint-plugin": "^5.56.0",
+        "@typescript-eslint/parser": "^5.56.0",
+        "@vitejs/plugin-react": "^3.1.0", 
+        "eslint": "^8.36.0",
+        "eslint-config-prettier": "^8.8.0",
+        "eslint-plugin-react": "^7.32.2",
+        "eslint-plugin-react-hooks": "^4.6.0",
+        "prettier": "^2.8.7",
+        "typescript": "^5.0.2",
+        "vite": "^4.3.9",
+        "vite-plugin-dts": "^2.3.0",
+        "vitest": "^0.31.0"
+    }
+}
