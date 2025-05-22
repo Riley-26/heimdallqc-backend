@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <!-- Base dark background -->
+  <rect width="100%" height="100%" fill="#121212"/>
+  
+  <!-- Subtle navy overlay -->
+  <rect width="100%" height="100%" fill="#1a1a2e" opacity="0.3"/>
+  
+  <!-- Enhanced blur filters -->
+  <defs>
+    <filter id="softBlur">
+      <feGaussianBlur stdDeviation="30" />
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.7 0"/>
+    </filter>
+  </defs>
+  
+  <!-- Larger frosted glass patches -->
+  <g filter="url(#softBlur)">
+    <!-- Extra large irregular polygon patches -->
+    <path d="M0,0 L500,100 L400,500 L-100,400 Z" fill="#ffffff" opacity="0.02"/>
+    <path d="M400,0 L900,50 L850,600 L380,500 Z" fill="#ffffff" opacity="0.025"/>
+    <path d="M0,400 L500,350 L600,900 L-50,850 Z" fill="#ffffff" opacity="0.02"/>
+    <path d="M400,500 L950,450 L900,1000 L380,980 Z" fill="#ffffff" opacity="0.022"/>
+    
+    <!-- Large overlapping patches with navy tint -->
+    <path d="M200,100 L700,50 L650,600 L150,550 Z" fill="#1a1a4f" opacity="0.015"/>
+    <path d="M500,300 L1000,250 L950,800 L450,750 Z" fill="#1a1a4f" opacity="0.018"/>
+    
+    <!-- Medium patches for transition -->
+    <path d="M300,600 L600,580 L580,900 L280,920 Z" fill="#ffffff" opacity="0.025"/>
+    <path d="M-50,250 L250,200 L300,500 L0,550 Z" fill="#ffffff" opacity="0.02"/>
+  </g>
+  
+  <!-- Additional overlay patches -->
+  <g filter="url(#softBlur)">
+    <path d="M250,150 L550,100 L500,400 L200,450 Z" fill="#ffffff" opacity="0.015"/>
+    <path d="M600,400 L900,350 L850,650 L550,700 Z" fill="#1a1a4f" opacity="0.012"/>
+  </g>
+</svg>

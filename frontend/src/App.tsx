@@ -3,7 +3,7 @@ import { useHMDL } from "./hooks/useHMDL"
 import './App.css'
 
 function App() {
-    const [text, setText] = useState("hello")
+    const [text, setText] = useState("")
 
     const {
         WidgetComponent,
@@ -12,14 +12,20 @@ function App() {
         isLoading,
         error
     } = useHMDL({
-        apiKey: "1"
+        apiKey: "1",
+        initialOpen: true
     })
 
     return (
         <>
-            <textarea></textarea>
-            <WidgetComponent></WidgetComponent>
-            <button onClick={() => {widgetActions.setText(text)}}>SUBMIT</button>
+            <div className='' style={{ display: "flex", flexDirection: "column" }}>   
+                <h1>HEIMDALL</h1>
+                <textarea value={text} onChange={(e) => {setText(e.target.value)}} style={{ width: "800px", height: "300px", fontSize: "18px", resize: "vertical", padding: "8px", margin: "0 0 12px 0" }}></textarea>
+            </div>
+            <div className='' style={{ maxWidth: "1200px", display: "flex", justifyContent: "center" }}>
+                <WidgetComponent></WidgetComponent>
+            </div>
+            <button onClick={() => {widgetActions.submit(text)}}>SUBMIT</button>
         </>
     )
 }

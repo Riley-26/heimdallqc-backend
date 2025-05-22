@@ -20,7 +20,6 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             ? window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
             : (widgetConfig.theme as 'light' | 'dark')
     );
-    const [data, setData] = useState<any | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<Error | null>(null);
     const [content, setContent] = useState<string>()
@@ -28,28 +27,33 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     // Combined state object
     const widgetState: WidgetState = {
         isOpen,
-        theme,
-        data
+        theme
     };
 
     // Load widget data from API
-    const fetchData = useCallback(async () => {
-        // In a real implementation, this would call the API
-        // For now, we'll just simulate data loading
+    const fetchData = useCallback(async (text:string) => {
         setIsLoading(true);
         setError(null);
 
         try {
             // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 500));
+            const submissionResponse = await fetch(
+                "http://127.0.0.1:8000/api/submissions",
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${widgetConfig.apiKey}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        api_key: widgetConfig.apiKey,
+                        source_url: window.location.href
+                    })
+                }
+            )
 
-            // Mock data
-            setData({
-                title: "Widget Demo",
-                content: "This is a demo widget"
-            });
-
-            widgetConfig.onEvent?.('data_loaded', data);
+            widgetConfig.onEvent?.('data_loaded', "Submitted");
         } catch (err) {
             setError(err instanceof Error ? err : new Error('Failed to fetch widget data'));
             widgetConfig.onEvent?.('error', err);
@@ -57,11 +61,6 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             setIsLoading(false);
         }
     }, [widgetConfig.apiKey, widgetConfig.apiUrl]);
-
-    // Load data on initial render
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
 
     // Widget control actions
     const widgetActions = {
@@ -80,8 +79,9 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
                 return newState;
             });
         },
-        submit: (data:string) => {
+        submit: async (data:string) => {
             console.log(data, 1)
+            await fetchData(data)
         },
         setText: (text:string) => {
             setContent(text)
@@ -89,11 +89,6 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         setTheme: (newTheme: 'light' | 'dark') => {
             setTheme(newTheme);
             widgetConfig.onEvent?.('theme_changed', newTheme);
-        },
-        refresh: async () => {
-            widgetConfig.onEvent?.('refresh_requested');
-            await fetchData();
-            return;
         }
     };
 

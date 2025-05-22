@@ -1,11 +1,10 @@
 import React from 'react';
 import { WidgetProps } from '../types';
-import '../styles/widget.css';
+import styles from '../styles/widget.module.css';
 
 export const HMDLWidget: React.FC<WidgetProps> = ({
     config,
     isOpen = false,
-    content = "",
     onClose,
     onOpen,
     onSubmit
@@ -16,39 +15,23 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
         : (config.theme || 'light')}`;
 
     return (
-        <div className={`widget-container`}>
-            {/* Widget Button */}
-            <button
-                className="widget-button"
-                onClick={() => isOpen ? onClose?.() : onOpen?.()}
-                aria-expanded={isOpen}
-                aria-label={isOpen ? "Close widget" : "Open widget"}
-            >
-                {isOpen ? 'X' : '?'}
-            </button>
+        <div className={`${styles.widgetContainer}`}>
+            {/* Widget Collapsed */}
+            
 
-            {/* Widget Content */}
+            {/* Widget Expanded */}
             {isOpen && (
-                <div className={`widget ${themeClass}`}>
-                    <div className="widget-header">
-                        <h3>Widget</h3>
-                        <button
-                            className="widget-close-button"
-                            onClick={() => onClose?.()}
-                            aria-label="Close widget"
-                        >
-                            x
-                        </button>
-                    </div>
-
-                    <div className="widget-content">
-                        <p>This is a customizable widget.</p>
-                        <p>API Key: {config.apiKey.substring(0, 4)}...</p>
-                    </div>
-
-                    <div className="widget-footer">
-                        <p>Widget Footer</p>
-                        <button onClick={() => {onSubmit?.(content)}}>Button</button>
+                <div className={`${styles.widget} ${themeClass}`}>
+                    <div className={`${styles.widgetMain}`}>
+                        <div className={`${styles.widgetHead}`}>
+                            <h1 className={`${styles.widgetHeader}`}>HEIMDALL</h1>
+                            
+                        </div>
+                        <div className={`${styles.widgetBody}`}>
+                            <div className={`${styles.widgetImgWrapper}`}>
+                                <img src="/Asset 3.svg" style={{ width:"80px" }}></img>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

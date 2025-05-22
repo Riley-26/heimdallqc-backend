@@ -20,7 +20,6 @@ export interface WidgetProps {
 export interface WidgetState {
     isOpen: boolean;
     theme: 'light' | 'dark';
-    data: any | null;
 }
 
 export interface WidgetActions {
@@ -30,7 +29,6 @@ export interface WidgetActions {
     submit: (data: string) => void;
     setTheme: (theme: 'light' | 'dark') => void;
     setText: (text: string) => void;
-    refresh: () => Promise<void>;
 }
 
 export interface UseWidgetResult {
