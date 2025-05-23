@@ -2,7 +2,7 @@ import React from 'react';
 import { WidgetProps } from '../types';
 import styles from '../styles/widget.module.css';
 import { Checkbox, FormGroup, FormControlLabel, ThemeProvider } from '@mui/material';
-import { theme } from '../styles/mainTheme';
+import { theme } from '../themes/mainTheme';
 
 export const HMDLWidget: React.FC<WidgetProps> = ({
     config,
