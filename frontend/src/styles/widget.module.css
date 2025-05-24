@@ -83,7 +83,7 @@
 }
 
 .widgetButton {
-    width: 100px;
+    width: 120px;
     letter-spacing: 1px;
     font-size: 14px;
     margin-top: 10px;
@@ -93,10 +93,20 @@
     font-weight: 700;
     background-color: unset;
     border: 2px solid #222;
+    border-radius: 0;
 }
 
 .widgetButton:hover {
     border: 2px solid #222;
+}
+
+.widgetButton:focus {
+    outline: none;
+}
+
+.widgetButtonActive {
+    background-color: #222;
+    color: unset;
 }
 
 .widgetImgWrapper {

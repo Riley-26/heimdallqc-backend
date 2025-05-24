@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { WidgetProps } from '../types';
 import styles from '../styles/widget.module.css';
 import { Checkbox, FormGroup, FormControlLabel, ThemeProvider } from '@mui/material';
@@ -11,6 +11,8 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
     onOpen,
     onSubmit
 }) => {
+    const [confirmed, setConfirmed] = useState(false)
+
     // Theme class
     const themeClass = `widget--${config.theme === 'auto'
         ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
@@ -37,8 +39,8 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
                                             <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 32 }, marginRight: "0" }} control={<Checkbox sx={{ color: "text.primary" }}/>} label=""/>
                                             <span>This contains AI generated content</span>
                                         </div>
-                                        <button className={`${styles.widgetButton}`}>
-                                            CONFIRM
+                                        <button className={`${styles.widgetButton} ${confirmed && styles.widgetButtonActive}`} onClick={() => {setConfirmed(!confirmed)}}>
+                                            CONFIRM{ confirmed && "ED" }
                                         </button>
                                     </div>
                                 </FormGroup>
