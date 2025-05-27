@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { HMDLWidget } from '../components/Widget';
 import { WidgetConfig, UseWidgetResult, WidgetState } from '../types';
@@ -23,10 +23,12 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<Error | null>(null);
     const [content, setContent] = useState<string>()
+    const [confirmed, setConfirmed] = useState<boolean>(false)
 
     // Combined state object
     const widgetState: WidgetState = {
         isOpen,
+        confirmed,
         theme
     };
 
@@ -81,7 +83,14 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         },
         submit: async (data:string) => {
             console.log(data, 1)
-            await fetchData(data)
+            if (confirmed) {
+                await fetchData(data)
+            } else {
+                console.log("please confirm")
+            }
+        },
+        confirm: (confirmed:boolean) => {
+            console.log(confirmed)
         },
         setText: (text:string) => {
             setContent(text)
@@ -99,7 +108,7 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             isOpen = { isOpen }
             onClose = { widgetActions.close }
             onOpen = { widgetActions.open }
-            content = { content }
+            onConfirm = { widgetActions.confirm }
             onSubmit = { widgetActions.submit }
         />
     )

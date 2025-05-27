@@ -11,14 +11,15 @@ export interface WidgetConfig {
 export interface WidgetProps {
     config: WidgetConfig;
     isOpen?: boolean;
-    content?: string;
     onClose?: () => void;
     onOpen?: () => void;
+    onConfirm?: (confirmed:boolean) => void;
     onSubmit?: (data: string) => void;
 }
 
 export interface WidgetState {
     isOpen: boolean;
+    confirmed: boolean;
     theme: 'light' | 'dark';
 }
 
@@ -32,7 +33,7 @@ export interface WidgetActions {
 }
 
 export interface UseWidgetResult {
-    WidgetComponent: ComponentType<{}>;
+    WidgetComponent: any;
     widgetState: WidgetState;
     widgetActions: WidgetActions;
     isLoading: boolean;
