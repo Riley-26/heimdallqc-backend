@@ -13,7 +13,10 @@ export interface WidgetProps {
     isOpen?: boolean;
     onClose?: () => void;
     onOpen?: () => void;
-    onConfirm?: (confirmed:boolean) => void;
+    onConfirm?: (state:boolean) => void;
+    confirmed?: boolean;
+    onCheck?: (state:boolean) => void;
+    checked?: boolean;
     onSubmit?: (data: string) => void;
 }
 
@@ -21,6 +24,7 @@ export interface WidgetState {
     isOpen: boolean;
     confirmed: boolean;
     theme: 'light' | 'dark';
+    checked: boolean;
 }
 
 export interface WidgetActions {
@@ -29,7 +33,7 @@ export interface WidgetActions {
     toggle: () => void;
     submit: (data: string) => void;
     setTheme: (theme: 'light' | 'dark') => void;
-    setText: (text: string) => void;
+    setText: (data: string) => void;
 }
 
 export interface UseWidgetResult {

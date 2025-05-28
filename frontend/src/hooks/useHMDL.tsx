@@ -24,16 +24,18 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const [error, setError] = useState<Error | null>(null);
     const [content, setContent] = useState<string>()
     const [confirmed, setConfirmed] = useState<boolean>(false)
+    const [checked, setChecked] = useState<boolean>(false)
 
     // Combined state object
     const widgetState: WidgetState = {
         isOpen,
         confirmed,
-        theme
+        theme,
+        checked
     };
 
     // Load widget data from API
-    const fetchData = useCallback(async (text:string) => {
+    const fetchData = useCallback(async (text: string) => {
         setIsLoading(true);
         setError(null);
 
@@ -81,7 +83,7 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
                 return newState;
             });
         },
-        submit: async (data:string) => {
+        submit: async (data: string) => {
             console.log(data, 1)
             if (confirmed) {
                 await fetchData(data)
@@ -89,11 +91,14 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
                 console.log("please confirm")
             }
         },
-        confirm: (confirmed:boolean) => {
-            console.log(confirmed)
+        confirm: (state: boolean) => {
+            setConfirmed(state)
         },
-        setText: (text:string) => {
-            setContent(text)
+        check: (state: boolean) => {
+            setChecked(state)
+        },
+        setText: (data: string) => {
+            setContent(data)
         },
         setTheme: (newTheme: 'light' | 'dark') => {
             setTheme(newTheme);
@@ -103,13 +108,16 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
 
     // Widget component with required props
     const WidgetComponent = () => (
-        <HMDLWidget 
-            config= { widgetConfig }
-            isOpen = { isOpen }
-            onClose = { widgetActions.close }
-            onOpen = { widgetActions.open }
-            onConfirm = { widgetActions.confirm }
-            onSubmit = { widgetActions.submit }
+        <HMDLWidget
+            config={widgetConfig}
+            isOpen={widgetState.isOpen}
+            onClose={widgetActions.close}
+            onOpen={widgetActions.open}
+            onConfirm={widgetActions.confirm}
+            confirmed={widgetState.confirmed}
+            onCheck={widgetActions.check}
+            checked={widgetState.checked}
+            onSubmit={widgetActions.submit}
         />
     )
 
