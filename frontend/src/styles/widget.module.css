@@ -19,7 +19,7 @@
 
 /* Widget Wrapper */
 .widget {
-
+    position: relative;
 }
 
 /* Widget Main */
@@ -109,8 +109,10 @@
 
 .widgetLogo {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: space-between;
+    margin-bottom: 8px;
 }
 
 .widgetLogoWrapper {
@@ -129,8 +131,58 @@
     color: #222;
 }
 
-/* DARK MODE */
+.widgetOptions {
+    position: absolute;
+    top: 0;
+    right: 4px;
+}
 
-.widgetBody--dark {
-    background: black;
+.widgetFooter {
+    display: flex;
+    justify-content: space-around;
+    width: 105px;
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+}
+
+.widgetFooter span {
+    font-size: 10px;
+    font-family: "mulish", sans-serif;
+    font-weight: 700;
+    color: #444;
+    letter-spacing: 0.2px;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/*
+    DARK MODE
+*/
+
+.dark.widgetBody {
+    background: #363636;
+}
+
+.dark.widgetMain {
+    border: 1px solid #454545cc;
+}
+
+.dark.widgetForm span,
+.dark.widgetLogoName,
+.dark.widgetButton {
+    color: #ddd;
+}
+
+.dark.widgetButton {
+    border: 1px solid #888;
+}
+
+.dark.widgetButtonActive {
+    background-color: #888;
+    color: #222;
+}
+
+.dark.widgetFooter span {
+    color: #aaa;
 }

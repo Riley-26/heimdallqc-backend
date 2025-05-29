@@ -5,7 +5,7 @@ import { theme } from '../themes/mainTheme';
 import { Logo } from './Logo';
 
 import { Checkbox, FormGroup, FormControlLabel, ThemeProvider } from '@mui/material';
-import { ArrowForwardIos, ArrowBackIos } from '@mui/icons-material';
+import { ArrowForwardIos, ArrowBackIos, MoreHoriz } from '@mui/icons-material';
 
 export const HMDLWidget: React.FC<WidgetProps> = ({
     config,
@@ -18,24 +18,23 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
 }) => {
 
     // Theme class
-    const themeClass = `--${config.theme === 'auto'
+    const themeClass = `${config.theme === 'auto'
         ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : (config.theme || 'light')}`;
-
 
     return (
         <div className={`${styles.widgetContainer}`}>
             {/* Widget Collapsed */}
             {!widgetState.isOpen && (
-                <ThemeProvider theme={widgetState.theme}>
-                    <div className={`${styles.widget} ${themeClass}`}>
-                        <div className={`${styles.widgetMain} ${styles.widgetMainColl}`}>
-                            <div className={`${styles.widgetBody}`}>
+                <ThemeProvider theme={theme}>
+                    <div className={`${styles.widget}`}>
+                        <div className={`${styles[themeClass]} ${styles.widgetMain} ${styles.widgetMainColl}`}>
+                            <div className={`${styles[themeClass]} ${styles.widgetBody}`}>
                                 <div>
-                                    <ArrowBackIos style={{ color: "#222", cursor: "pointer", marginLeft: "8px" }} onClick={() => { onOpen?.() }} />
+                                    <ArrowBackIos style={{ color: `#${ themeClass === "dark" ? "bbb" : "444" }`, cursor: "pointer", marginLeft: "12px" }} onClick={() => { onOpen?.() }} />
                                 </div>
-                                <div style={{ margin: "0 12px 0 8px" }}>
-                                    <Logo />
+                                <div style={{ margin: "0 12px 0 0" }}>
+                                    <Logo colourMode={themeClass} />
                                 </div>
                             </div>
                         </div>
@@ -46,16 +45,16 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
             {/* Widget Expanded */}
             {widgetState.isOpen && (
                 <ThemeProvider theme={theme}>
-                    <div className={`${styles.widget} ${themeClass}`}>
-                        <div className={`${styles.widgetMain}`}>
-                            <div className={`${styles.widgetBody}`}>
+                    <div className={`${styles.widget}`}>
+                        <div className={`${styles[themeClass]} ${styles.widgetMain}`}>
+                            <div className={`${styles[themeClass]} ${styles.widgetBody}`}>
                                 <FormGroup>
                                     <div>
-                                        <div className={`${styles.widgetForm}`}>
+                                        <div className={`${styles[themeClass]} ${styles.widgetForm}`}>
                                             <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, marginRight: "0" }} checked={widgetState.checked} control={<Checkbox sx={{ color: "text.primary" }} />} label="" onClick={() => { onCheck?.(!widgetState.checked) }} />
                                             <span>This contains AI generated content</span>
                                         </div>
-                                        <button type='button' className={`${styles.widgetButton} ${widgetState.confirmed && styles.widgetButtonActive}`} onClick={() => {
+                                        <button type='button' className={`${styles[themeClass]} ${styles.widgetButton} ${widgetState.confirmed && styles.widgetButtonActive}`} onClick={() => {
                                             onConfirm?.(!widgetState.confirmed)
                                         }}>
                                             CONFIRM{widgetState.confirmed && "ED"}
@@ -63,10 +62,17 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
                                     </div>
                                 </FormGroup>
                                 <div className={`${styles.widgetLogo}`}>
-                                    <div>
-                                        <ArrowForwardIos style={{ color: "#222", cursor: "pointer" }} onClick={() => { onClose?.() }} />
+                                    <div className={`${styles[themeClass]} ${styles.widgetOptions}`}>
+                                        <MoreHoriz style={{ fontSize: "22px", color: `#${ themeClass === "dark" ? "bbb" : "444" }` }} />
                                     </div>
-                                    <Logo />
+                                    <div style={{ display: "flex", alignItems: "center" }}>
+                                        <ArrowForwardIos style={{ color: `#${ themeClass === "dark" ? "bbb" : "444" }`, cursor: "pointer" }} onClick={() => { onClose?.() }} />
+                                        <Logo colourMode={themeClass} />
+                                    </div>
+                                    <div className={`${styles[themeClass]} ${styles.widgetFooter}`}>
+                                        <span>Terms</span>
+                                        <span>Privacy</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
