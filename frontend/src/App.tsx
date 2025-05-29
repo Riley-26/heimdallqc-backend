@@ -4,7 +4,6 @@ import './App.css'
 
 function App() {
     const textareaRef = useRef(null)
-    const [text, setText] = useState("")
 
     const {
         WidgetComponent,
@@ -14,19 +13,20 @@ function App() {
         error
     } = useHMDL({
         apiKey: "1",
-        initialOpen: true
+        initialOpen: true,
+        theme: "dark"
     })
 
     return (
         <>
             <div className='' style={{ display: "flex", flexDirection: "column" }}>
                 <h1>HEIMDALL</h1>
-                <textarea ref={textareaRef} onChange={(e) => {setText(e.target.value)}} style={{ width: "800px", height: "300px", fontSize: "18px", resize: "vertical", padding: "8px", margin: "0 0 12px 0" }}></textarea>
+                <textarea ref={textareaRef} style={{ width: "800px", height: "300px", fontSize: "18px", resize: "vertical", padding: "8px", margin: "0 0 12px 0" }}></textarea>
             </div>
             <div className='' style={{ maxWidth: "1200px", display: "flex", justifyContent: "center" }}>
                 {WidgetComponent()}
             </div>
-            <button onClick={() => {widgetActions.submit(`${textareaRef.current?.["value"]}`)}}>SUBMIT</button>
+            <button onClick={() => { widgetActions.submit(`${textareaRef.current?.["value"]}`) }}>SUBMIT</button>
         </>
     )
 }

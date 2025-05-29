@@ -10,14 +10,17 @@ export interface WidgetConfig {
 
 export interface WidgetProps {
     config: WidgetConfig;
-    isOpen?: boolean;
     onClose?: () => void;
     onOpen?: () => void;
     onConfirm?: (state:boolean) => void;
-    confirmed?: boolean;
     onCheck?: (state:boolean) => void;
-    checked?: boolean;
     onSubmit?: (data: string) => void;
+    widgetState: {
+        isOpen: boolean;
+        confirmed: boolean;
+        checked: boolean;
+        theme: "light" | "dark";
+    };
 }
 
 export interface WidgetState {
@@ -33,7 +36,6 @@ export interface WidgetActions {
     toggle: () => void;
     submit: (data: string) => void;
     setTheme: (theme: 'light' | 'dark') => void;
-    setText: (data: string) => void;
 }
 
 export interface UseWidgetResult {

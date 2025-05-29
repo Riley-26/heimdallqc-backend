@@ -84,21 +84,21 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             });
         },
         submit: async (data: string) => {
-            console.log(data, 1)
+            console.log(data)
             if (confirmed) {
                 await fetchData(data)
+                widgetConfig.onEvent?.("submitted", data);
             } else {
                 console.log("please confirm")
             }
         },
         confirm: (state: boolean) => {
             setConfirmed(state)
+            widgetConfig.onEvent?.(state ? "confirmed": "unconfirmed", state);
         },
         check: (state: boolean) => {
             setChecked(state)
-        },
-        setText: (data: string) => {
-            setContent(data)
+            widgetConfig.onEvent?.(state ? "checked": "unchecked", state);
         },
         setTheme: (newTheme: 'light' | 'dark') => {
             setTheme(newTheme);
@@ -110,14 +110,12 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const WidgetComponent = () => (
         <HMDLWidget
             config={widgetConfig}
-            isOpen={widgetState.isOpen}
             onClose={widgetActions.close}
             onOpen={widgetActions.open}
             onConfirm={widgetActions.confirm}
-            confirmed={widgetState.confirmed}
             onCheck={widgetActions.check}
-            checked={widgetState.checked}
             onSubmit={widgetActions.submit}
+            widgetState={widgetState}
         />
     )
 

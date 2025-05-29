@@ -9,26 +9,25 @@ import { ArrowForwardIos, ArrowBackIos } from '@mui/icons-material';
 
 export const HMDLWidget: React.FC<WidgetProps> = ({
     config,
-    isOpen = false,
     onClose,
     onOpen,
     onConfirm,
-    confirmed,
     onCheck,
-    checked,
-    onSubmit
+    onSubmit,
+    widgetState
 }) => {
 
     // Theme class
-    const themeClass = `widget--${config.theme === 'auto'
+    const themeClass = `--${config.theme === 'auto'
         ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : (config.theme || 'light')}`;
+
 
     return (
         <div className={`${styles.widgetContainer}`}>
             {/* Widget Collapsed */}
-            {!isOpen && (
-                <ThemeProvider theme={theme}>
+            {!widgetState.isOpen && (
+                <ThemeProvider theme={widgetState.theme}>
                     <div className={`${styles.widget} ${themeClass}`}>
                         <div className={`${styles.widgetMain} ${styles.widgetMainColl}`}>
                             <div className={`${styles.widgetBody}`}>
@@ -45,7 +44,7 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
             )}
 
             {/* Widget Expanded */}
-            {isOpen && (
+            {widgetState.isOpen && (
                 <ThemeProvider theme={theme}>
                     <div className={`${styles.widget} ${themeClass}`}>
                         <div className={`${styles.widgetMain}`}>
@@ -53,13 +52,13 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
                                 <FormGroup>
                                     <div>
                                         <div className={`${styles.widgetForm}`}>
-                                            <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, marginRight: "0" }} checked={checked} control={<Checkbox sx={{ color: "text.primary" }} />} label="" onClick={() => { onCheck?.(!checked) }} />
+                                            <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, marginRight: "0" }} checked={widgetState.checked} control={<Checkbox sx={{ color: "text.primary" }} />} label="" onClick={() => { onCheck?.(!widgetState.checked) }} />
                                             <span>This contains AI generated content</span>
                                         </div>
-                                        <button type='button' className={`${styles.widgetButton} ${confirmed && styles.widgetButtonActive}`} onClick={() => {
-                                            onConfirm?.(!confirmed)
+                                        <button type='button' className={`${styles.widgetButton} ${widgetState.confirmed && styles.widgetButtonActive}`} onClick={() => {
+                                            onConfirm?.(!widgetState.confirmed)
                                         }}>
-                                            CONFIRM{confirmed && "ED"}
+                                            CONFIRM{widgetState.confirmed && "ED"}
                                         </button>
                                     </div>
                                 </FormGroup>
