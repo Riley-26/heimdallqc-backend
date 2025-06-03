@@ -2,9 +2,8 @@ import { FC, ComponentType } from 'react';
 
 export interface WidgetConfig {
     apiKey: string;
-    theme?: 'light' | 'dark' | 'auto';
+    darkTheme?: boolean;
     initialOpen?: boolean;
-    apiUrl?: string;
     onEvent?: (eventName: string, data?: any) => void;
 }
 
@@ -19,14 +18,14 @@ export interface WidgetProps {
         isOpen: boolean;
         confirmed: boolean;
         checked: boolean;
-        theme: "light" | "dark";
+        darkTheme: boolean;
     };
 }
 
 export interface WidgetState {
     isOpen: boolean;
     confirmed: boolean;
-    theme: 'light' | 'dark';
+    darkTheme: boolean;
     checked: boolean;
 }
 
@@ -35,7 +34,7 @@ export interface WidgetActions {
     close: () => void;
     toggle: () => void;
     submit: (data: string) => void;
-    setTheme: (theme: 'light' | 'dark') => void;
+    setDarkTheme: (isDark: boolean) => void;
 }
 
 export interface UseWidgetResult {

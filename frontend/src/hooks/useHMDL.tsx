@@ -7,19 +7,14 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     // Default configuration with fallbacks
     const widgetConfig: WidgetConfig = {
         apiKey: config.apiKey,
-        theme: config.theme || 'light',
+        darkTheme: config.darkTheme,
         initialOpen: config.initialOpen || false,
-        apiUrl: config.apiUrl || '/api',
         onEvent: config.onEvent || (() => { })
     };
 
     // State management
     const [isOpen, setIsOpen] = useState<boolean>(widgetConfig.initialOpen || false);
-    const [theme, setTheme] = useState<'light' | 'dark'>(
-        widgetConfig.theme === 'auto'
-            ? window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-            : (widgetConfig.theme as 'light' | 'dark')
-    );
+    const [darkTheme, setDarkTheme] = useState<boolean>(true);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<Error | null>(null);
     const [content, setContent] = useState<string>()
@@ -30,41 +25,43 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const widgetState: WidgetState = {
         isOpen,
         confirmed,
-        theme,
+        darkTheme,
         checked
     };
 
     // Load widget data from API
-    const fetchData = useCallback(async (text: string) => {
+    const fetchData = async (text: string) => {
         setIsLoading(true);
         setError(null);
 
-        try {
-            // Simulate API call
-            const submissionResponse = await fetch(
-                "http://127.0.0.1:8000/api/submissions",
-                {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${widgetConfig.apiKey}`,
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        text: text,
-                        api_key: widgetConfig.apiKey,
-                        source_url: window.location.href
-                    })
-                }
-            )
-
-            widgetConfig.onEvent?.('data_loaded', "Submitted");
-        } catch (err) {
-            setError(err instanceof Error ? err : new Error('Failed to fetch widget data'));
-            widgetConfig.onEvent?.('error', err);
-        } finally {
-            setIsLoading(false);
+        if (text){
+            try {
+                // Simulate API call
+                const submissionResponse = await fetch(
+                    "http://127.0.0.1:8000/api/submissions",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${widgetConfig.apiKey}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            text: text,
+                            api_key: widgetConfig.apiKey,
+                            source_url: window.location.href
+                        })
+                    }
+                )
+    
+                widgetConfig.onEvent?.('data_loaded', "Submitted");
+            } catch (err) {
+                setError(err instanceof Error ? err : new Error('Failed to analyse submitted data'));
+                widgetConfig.onEvent?.('error', err);
+            } finally {
+                setIsLoading(false);
+            }
         }
-    }, [widgetConfig.apiKey, widgetConfig.apiUrl]);
+    };
 
     // Widget control actions
     const widgetActions = {
@@ -100,9 +97,9 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             setChecked(state)
             widgetConfig.onEvent?.(state ? "checked": "unchecked", state);
         },
-        setTheme: (newTheme: 'light' | 'dark') => {
-            setTheme(newTheme);
-            widgetConfig.onEvent?.('theme_changed', newTheme);
+        setDarkTheme: (isDark: boolean) => {
+            setDarkTheme(isDark);
+            widgetConfig.onEvent?.('theme_changed', isDark);
         }
     };
 

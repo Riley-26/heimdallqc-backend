@@ -7,6 +7,8 @@ from alembic import context
 
 from app.db.database import Base, engine, DATABASE_URL
 from app.models.submission import Submission
+from app.models.api_key import ApiKey
+from app.models.owner import Owner
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

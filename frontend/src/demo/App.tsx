@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { useHMDL } from "./hooks/useHMDL"
+import { useHMDL } from "../hooks/useHMDL"
 import './App.css'
 
 function App() {
@@ -13,8 +13,7 @@ function App() {
         error
     } = useHMDL({
         apiKey: "1",
-        initialOpen: true,
-        theme: "dark"
+        darkTheme: true
     })
 
     return (
@@ -23,7 +22,7 @@ function App() {
                 <h1>HEIMDALL</h1>
                 <textarea ref={textareaRef} style={{ width: "800px", height: "300px", fontSize: "18px", resize: "vertical", padding: "8px", margin: "0 0 12px 0" }}></textarea>
             </div>
-            <div className='' style={{ maxWidth: "1200px", display: "flex", justifyContent: "center" }}>
+            <div className='' style={{ maxWidth: "1200px", display: "flex", justifyContent: "center", flexDirection: "column" }}>
                 {WidgetComponent()}
             </div>
             <button onClick={() => { widgetActions.submit(`${textareaRef.current?.["value"]}`) }}>SUBMIT</button>

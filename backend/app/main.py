@@ -47,10 +47,13 @@ async def process_text(text):
     
     meets_requirements = word_count >= 5
     
+    score = word_count
+    
     result = {
         "word_count": word_count,
         "processed_successfully": True,
         "meets_requirements": meets_requirements,
+        "score": score,
         "analysis": {
             "sentiment": "positive" if "good" in text.lower() else "neutral",
         }
@@ -86,6 +89,9 @@ async def create_submission(
         
         # Update submission based on processing result
         if processing_result["processed_successfully"]:
+            if processing_result["score"]:
+                submission.score = processing_result["score"]
+            
             if processing_result["meets_requirements"]:
                 submission.status = ProcessingStatus.SUCCESS
                 submission.processing_result = processing_result
