@@ -13,22 +13,19 @@ class ApiKey(Base):
     # Primary key
     id = Column(Integer, primary_key=True, index=True)
     
-    # Foreign key to user
+    # Foreign key
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
     
     # API key details
     key = Column(String(64), unique=True, index=True, nullable=False)
-    name = Column(String, nullable=False)
+    name = Column(String(100), nullable=False)  # "Production", "Development", etc.
     
     # Status
-    active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
     
-    # Limits
-    
-    # Usage
-    
-    # Domain restriction
-    allowed_domains = Column(JSON, nullable=True)
+    # Usage tracking
+    total_requests = Column(Integer, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -36,7 +33,7 @@ class ApiKey(Base):
     # Relationships
     owner = relationship("Owner", back_populates="api_keys")
     submissions = relationship("Submission", back_populates="api_key_obj")
-    
+
     def __repr__(self):
         return f"<ApiKey(id={self.id}, name={self.name}, owner_id={self.owner_id})>"
     

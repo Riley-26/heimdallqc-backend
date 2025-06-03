@@ -6,9 +6,8 @@ from enum import Enum
 
 class OwnerBase(BaseModel):
     email: EmailStr
-    first_name: str
-    last_name: str
-    site_url: str
+    name: str
+    domain: str
     
     
 class OwnerCreate(OwnerBase):
@@ -19,50 +18,30 @@ class OwnerCreate(OwnerBase):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
         return v
-    
-    
+
+
 class OwnerUpdate(BaseModel):
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    website_url: Optional[str] = None
-    
-    
-class OwnerResponse(BaseModel):
+    name: Optional[str] = None
+    domain: Optional[str] = None
+
+
+class OwnerResponse(OwnerBase):
     id: int
-    api_key: str
-    active: bool
-    verified: bool
-    # Limits
-    
+    is_active: bool
+    is_verified: bool
+    monthly_submission_limit: int
+    monthly_submissions_used: int
     created_at: datetime
-    updated_at: datetime
-    last_login_at: Optional[datetime] = None
-    
+
     class Config:
         field_attributes = True
-        
 
-# Authentication schemas
-class UserLogin(BaseModel):
+
+class OwnerLogin(BaseModel):
     email: EmailStr
     password: str
-    
-    
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    
-    
-class PasswordReset(BaseModel):
-    email: EmailStr
-    
-    
-class PasswordResetConfirm(BaseModel):
-    token: str
-    new_password: str
-    
-    @field_validator('new_password')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        return v
