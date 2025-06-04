@@ -28,6 +28,7 @@ class Submission(Base):
     text = Column(Text, nullable=False)
     text_length = Column(Integer, nullable=False)
     custom_id = Column(Integer, nullable=True)
+    questionResult = Column(Boolean, nullable=False)
     
     # Processing
     status = Column(String(50), default=ProcessingStatus.PENDING, index=True)
@@ -36,7 +37,7 @@ class Submission(Base):
     failure_reason = Column(String(500), nullable=True)
     
     # Basic tracking
-    source_url = Column(String(1000), nullable=True)
+    domain = Column(String(1000), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

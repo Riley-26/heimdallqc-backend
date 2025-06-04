@@ -4,6 +4,7 @@ import { HMDLWidget } from '../components/Widget';
 import { WidgetConfig, UseWidgetResult, WidgetState } from '../types';
 
 export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
+
     // Default configuration with fallbacks
     const widgetConfig: WidgetConfig = {
         apiKey: config.apiKey,
@@ -12,8 +13,10 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         onEvent: config.onEvent || (() => { })
     };
 
+
     // State management
     const [isOpen, setIsOpen] = useState<boolean>(widgetConfig.initialOpen || false);
+    const [showAlert, setShowAlert] = useState<boolean>(false);
     const [darkTheme, setDarkTheme] = useState<boolean>(true);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<Error | null>(null);
@@ -21,47 +24,18 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const [confirmed, setConfirmed] = useState<boolean>(false)
     const [checked, setChecked] = useState<boolean>(false)
 
+
     // Combined state object
     const widgetState: WidgetState = {
         isOpen,
         confirmed,
         darkTheme,
-        checked
+        checked,
+        isLoading,
+        showAlert,
+        setShowAlert
     };
 
-    // Load widget data from API
-    const fetchData = async (text: string) => {
-        setIsLoading(true);
-        setError(null);
-
-        if (text){
-            try {
-                // Simulate API call
-                const submissionResponse = await fetch(
-                    "http://127.0.0.1:8000/api/submissions",
-                    {
-                        method: "POST",
-                        headers: {
-                            "Authorization": `Bearer ${widgetConfig.apiKey}`,
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            text: text,
-                            api_key: widgetConfig.apiKey,
-                            source_url: window.location.href
-                        })
-                    }
-                )
-    
-                widgetConfig.onEvent?.('data_loaded', "Submitted");
-            } catch (err) {
-                setError(err instanceof Error ? err : new Error('Failed to analyse submitted data'));
-                widgetConfig.onEvent?.('error', err);
-            } finally {
-                setIsLoading(false);
-            }
-        }
-    };
 
     // Widget control actions
     const widgetActions = {
@@ -80,13 +54,14 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
                 return newState;
             });
         },
-        submit: async (data: string) => {
-            console.log(data)
+        submit: async (data: string, customId?: number) => {
             if (confirmed) {
-                await fetchData(data)
+                await createSubmission(data, customId)
                 widgetConfig.onEvent?.("submitted", data);
             } else {
                 console.log("please confirm")
+                setShowAlert(true)
+                setIsOpen(true)
             }
         },
         confirm: (state: boolean) => {
@@ -102,6 +77,38 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             widgetConfig.onEvent?.('theme_changed', isDark);
         }
     };
+
+
+    // Create new submission
+    const createSubmission = async (text: string, customId?: number) => {
+        setIsLoading(true);
+        setError(null);
+
+        if (text && text.length > 10){
+            const submissionResponse = await fetch(
+                "http://127.0.0.1:8000/api/submissions",
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${widgetConfig.apiKey}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        domain: window.location.hostname,
+                        custom_id: customId,
+                        questionResult: checked
+                    })
+                }
+            )
+
+            const submissionCreated = await submissionResponse.json()
+            console.log(submissionCreated)
+        } 
+
+        setIsLoading(false);
+    };
+
 
     // Widget component with required props
     const WidgetComponent = () => (

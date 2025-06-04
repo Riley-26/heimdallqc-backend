@@ -3,6 +3,8 @@ import { WidgetProps } from '../types';
 import styles from '../styles/widget.module.css';
 import { theme } from '../themes/mainTheme';
 import { Logo } from './Logo';
+import { Loading } from './Loading';
+import { Alert } from './Alert';
 
 import { Checkbox, FormGroup, FormControlLabel, ThemeProvider } from '@mui/material';
 import { ArrowForwardIos, ArrowBackIos, MoreHoriz } from '@mui/icons-material';
@@ -19,6 +21,14 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
 
     // Theme class
     const themeClass = `${config.darkTheme && "dark"}`;
+
+    useEffect(() => {
+
+        if (widgetState.confirmed === true){
+            widgetState.setShowAlert(false)
+        }
+
+    }, [widgetState.showAlert, widgetState.confirmed])
 
     return (
         <div className={`${styles.widgetContainer}`}>
@@ -41,22 +51,26 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
             {/* Widget Expanded */}
             {widgetState.isOpen && (
                 <ThemeProvider theme={theme}>
+                    { widgetState.showAlert && <Alert colourMode={themeClass} /> }
                     <div className={`${styles.widget}`}>
                         <div className={`${styles[themeClass] || ""} ${styles.widgetMain}`}>
                             <div className={`${styles[themeClass] || ""} ${styles.widgetBody}`}>
-                                <FormGroup>
-                                    <div>
-                                        <div className={`${styles[themeClass] || ""} ${styles.widgetForm}`}>
-                                            <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, marginRight: "0" }} checked={widgetState.checked} control={<Checkbox sx={{ color: "text.primary" }} />} label="" onClick={() => { onCheck?.(!widgetState.checked) }} />
-                                            <span>This contains AI generated content</span>
+                                {
+                                    widgetState.isLoading ? <Loading colourMode={themeClass} /> : 
+                                    <FormGroup>
+                                        <div>
+                                            <div className={`${styles[themeClass] || ""} ${styles.widgetForm}`}>
+                                                <FormControlLabel sx={{ '& .MuiSvgIcon-root': { fontSize: 28 }, marginRight: "0" }} checked={widgetState.checked} control={<Checkbox sx={{ color: "text.primary" }} />} label="" onClick={() => { onCheck?.(!widgetState.checked) }} />
+                                                <span>This contains AI generated content</span>
+                                            </div>
+                                            <button type='button' className={`${styles[themeClass] || ""} ${styles.widgetButton} ${widgetState.confirmed && styles.widgetButtonActive}`} onClick={() => {
+                                                onConfirm?.(!widgetState.confirmed)
+                                            }}>
+                                                CONFIRM{widgetState.confirmed && "ED"}
+                                            </button>
                                         </div>
-                                        <button type='button' className={`${styles[themeClass] || ""} ${styles.widgetButton} ${widgetState.confirmed && styles.widgetButtonActive}`} onClick={() => {
-                                            onConfirm?.(!widgetState.confirmed)
-                                        }}>
-                                            CONFIRM{widgetState.confirmed && "ED"}
-                                        </button>
-                                    </div>
-                                </FormGroup>
+                                    </FormGroup>
+                                }
                                 <div style={{ display: "flex", alignItems: "center" }}>
                                     <ArrowForwardIos style={{ color: `#${ themeClass === "dark" ? "bbb" : "444" }`, cursor: "pointer" }} onClick={() => { onClose?.() }} />
                                     <Logo colourMode={themeClass} />

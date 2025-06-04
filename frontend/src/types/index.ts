@@ -14,12 +14,7 @@ export interface WidgetProps {
     onConfirm?: (state:boolean) => void;
     onCheck?: (state:boolean) => void;
     onSubmit?: (data: string) => void;
-    widgetState: {
-        isOpen: boolean;
-        confirmed: boolean;
-        checked: boolean;
-        darkTheme: boolean;
-    };
+    widgetState: WidgetState
 }
 
 export interface WidgetState {
@@ -27,13 +22,16 @@ export interface WidgetState {
     confirmed: boolean;
     darkTheme: boolean;
     checked: boolean;
+    isLoading: boolean;
+    showAlert: boolean;
+    setShowAlert: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export interface WidgetActions {
     open: () => void;
     close: () => void;
     toggle: () => void;
-    submit: (data: string) => void;
+    submit: (data: string, customId?: number) => void;
     setDarkTheme: (isDark: boolean) => void;
 }
 

@@ -12,8 +12,9 @@ function App() {
         isLoading,
         error
     } = useHMDL({
-        apiKey: "1",
-        darkTheme: true
+        apiKey: "SkdsJXjnDfdctDSGJwBpPnBW6peOvb34oMbyQxcQfPfeDVTI",
+        darkTheme: true,
+        initialOpen: true
     })
 
     return (
