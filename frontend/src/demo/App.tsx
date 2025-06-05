@@ -23,7 +23,7 @@ function App() {
                 <h1>HEIMDALL</h1>
                 <textarea ref={textareaRef} style={{ width: "800px", height: "300px", fontSize: "18px", resize: "vertical", padding: "8px", margin: "0 0 12px 0" }}></textarea>
             </div>
-            <div className='' style={{ maxWidth: "1200px", display: "flex", justifyContent: "center", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {WidgetComponent()}
             </div>
             <button onClick={() => { widgetActions.submit(`${textareaRef.current?.["value"]}`) }}>SUBMIT</button>
