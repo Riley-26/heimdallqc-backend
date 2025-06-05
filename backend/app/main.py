@@ -124,16 +124,6 @@ async def process_text(text: str) -> dict:
     
     return result
 
-# Helper function to extract domain from URL
-def extract_domain(url: str) -> str:
-    """Extract domain from URL for analytics"""
-    try:
-        if url and url.startswith(('http://', 'https://')):
-            return urlparse(url).netloc.lower()
-        return None
-    except:
-        return None
-
 # Helper function to authenticate API key
 async def authenticate_api_key(api_key: str, db: Session) -> ApiKey:
     """Authenticate and return the API key object"""
@@ -191,10 +181,17 @@ async def process_submission_background(submission_id: int):
         db.close()
 
 
+# PUBLIC: ANYONE CAN ACCESS
+# PRIVATE - KEY: NEEDS VALID API KEY TO ACCESS
+# PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
+
 # ---------- OWNER ENDPOINTS ----------
 
-@app.post("/api/owners", response_model=OwnerResponse)
-async def create_owner(owner_data: OwnerCreate, db: Session = Depends(get_db)):
+@app.post("/api/owners", response_model=OwnerResponse) # PUBLIC
+async def create_owner(
+    owner_data: OwnerCreate,
+    db: Session = Depends(get_db)
+):
     """
     Create a new owner account.
     """
@@ -227,11 +224,15 @@ async def create_owner(owner_data: OwnerCreate, db: Session = Depends(get_db)):
         created_at=owner.created_at
     )
 
-@app.get("/api/owners/{owner_id}", response_model=OwnerResponse)
-async def get_owner(owner_id: int, db: Session = Depends(get_db)):
+@app.get("/api/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
+async def get_owner(
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
     """
     Get owner by ID.
     """
+    
     owner = db.query(Owner).filter(Owner.id == owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
@@ -251,7 +252,7 @@ async def get_owner(owner_id: int, db: Session = Depends(get_db)):
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/owners/{owner_id}/api-keys", response_model=ApiKeyResponse)
+@app.post("/api/owners/{owner_id}/api-keys", response_model=ApiKeyResponse) # PRIVATE - LOGIN
 async def create_api_key(
     owner_id: int, 
     api_key_data: ApiKeyCreate, 
@@ -295,10 +296,13 @@ async def create_api_key(
         created_at=api_key.created_at
     )
 
-@app.get("/api/owners/{owner_id}/api-keys")
-async def list_api_keys(owner_id: int, db: Session = Depends(get_db)):
+@app.get("/api/owners/{owner_id}/api-keys") # PRIVATE - LOGIN
+async def list_api_keys(
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
     """
-    List all API keys for a owner (with masked keys).
+    List all API keys for an owner (with masked keys).
     """
     # Check if owner exists
     owner = db.query(Owner).filter(Owner.id == owner_id).first()
@@ -321,8 +325,11 @@ async def list_api_keys(owner_id: int, db: Session = Depends(get_db)):
         for key in api_keys
     ]
 
-@app.delete("/api/api-keys/{api_key_id}")
-async def delete_api_key(api_key_id: int, db: Session = Depends(get_db)):
+@app.delete("/api/api-keys/{api_key_id}") # PRIVATE - LOGIN
+async def delete_api_key(
+    api_key_id: int,
+    db: Session = Depends(get_db)
+):
     """
     Delete (deactivate) an API key.
     """
@@ -339,7 +346,7 @@ async def delete_api_key(api_key_id: int, db: Session = Depends(get_db)):
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/submissions", response_model=SubmissionResponse)
+@app.post("/api/submissions", response_model=SubmissionResponse) # PRIVATE - KEY
 async def create_submission(
     submission_data: SubmissionCreate,
     request: Request,
@@ -441,7 +448,7 @@ async def create_submission(
             message="Sorry, there was an error processing your submission. Please try again."
         )
 
-@app.get("/api/submissions/{submission_id}", response_model=SubmissionResponse)
+@app.get("/api/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
 async def get_submission_status(
     submission_id: int, 
     api_key: str,
@@ -480,7 +487,7 @@ async def get_submission_status(
         message=message_map.get(submission.status, "Status unknown")
     )
 
-@app.get("/api/owners/{owner_id}/submissions")
+@app.get("/api/owners/{owner_id}/submissions") # PRIVATE - LOGIN
 async def list_owner_submissions(
     owner_id: int,
     skip: int = 0,
@@ -518,7 +525,7 @@ async def list_owner_submissions(
         for sub in submissions
     ]
 
-@app.get("/api/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse)
+@app.get("/api/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
 async def get_submission_detail(
     owner_id: int,
     submission_id: int, 
@@ -548,10 +555,13 @@ async def get_submission_detail(
         message="Submission details retrieved successfully"
     )
 
-@app.get("/api/owners/{owner_id}/submissions/stats")
-async def get_submission_stats(owner_id: int, db: Session = Depends(get_db)):
+@app.get("/api/owners/{owner_id}/submissions/stats") # PRIVATE - LOGIN
+async def get_submission_stats(
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
 
-    """Get submission statistics for a owner."""
+    """Get submission statistics for an owner."""
     # Verify owner exists
     owner = db.query(Owner).filter(Owner.id == owner_id).first()
     if not owner:
@@ -579,6 +589,16 @@ async def get_submission_stats(owner_id: int, db: Session = Depends(get_db)):
         "pending_submissions": pending,
         "success_rate": round((successful / total * 100) if total > 0 else 0, 2)
     }
+    
+    
+# ---------- LOG IN ENDPOINTS ----------
+
+# LOG IN
+
+# LOG OUT
+    
+
+    
     
 if __name__ == "__main__":
     import uvicorn
