@@ -13,10 +13,13 @@ class Owner(Base):
     # Authentication
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    reset_token = Column(String(255), nullable=True)
+    token_expiration = Column(DateTime(timezone=True), nullable=True)
     
     # Basic profile
     name = Column(String(200), nullable=False)
     domain = Column(String(200), nullable=True)
+    company = Column(String(200), nullable=True)
     
     # Account status
     is_active = Column(Boolean, default=True)

@@ -8,6 +8,7 @@ class OwnerBase(BaseModel):
     email: EmailStr
     name: str
     domain: str
+    company: str
     
     
 class OwnerCreate(OwnerBase):
@@ -40,6 +41,16 @@ class OwnerResponse(OwnerBase):
 class OwnerLogin(BaseModel):
     email: EmailStr
     password: str
+    
+    
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    token: str
+    new_password: str
 
 
 class Token(BaseModel):

@@ -1,3 +1,4 @@
+import secrets
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 import asyncio
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from passlib.context import CryptContext
 from urllib.parse import urlparse
@@ -16,7 +17,7 @@ from .db.database import get_db
 from .models.owner import Owner
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import OwnerCreate, OwnerResponse
+from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
 from .schemas.submission import SubmissionCreate, SubmissionResponse, SubmissionDetailResponse
 
@@ -77,18 +78,25 @@ def get_api_key_from_header(authorization: str = Header(None)) -> str:
     
     return api_key
 
+def send_reset_email(email: str, reset_token: str):
+    return {
+        "email": email,
+        "reset_token": reset_token,
+        "reset_link": f"http://localhost:3000/signin/reset-password?token={reset_token}"
+    }
+        
 
 # ---------- PASSWORD HASHING ----------
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
 
 def hash_password(password: str) -> str:
     """Hash a password"""
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password"""
-    return pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
 # ---------- PROCESSING/HELPER FUNCTIONS ----------
@@ -181,13 +189,28 @@ async def process_submission_background(submission_id: int):
         db.close()
 
 
+# ---------- ANALYSIS FUNCTIONS ----------
+
+# -- AI ANALYSIS
+
+# -- PLAGIARISM ANALYSIS
+
+# -- AUTO-CITATION
+
+# -- AI REWRITE
+
+# -- VERIF CHECKER
+
+# -- ANALYTICS
+
+
+# ---------- OWNER ENDPOINTS ----------
+
 # PUBLIC: ANYONE CAN ACCESS
 # PRIVATE - KEY: NEEDS VALID API KEY TO ACCESS
 # PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
 
-# ---------- OWNER ENDPOINTS ----------
-
-@app.post("/api/owners", response_model=OwnerResponse) # PUBLIC
+@app.post("/api/owners") # PUBLIC
 async def create_owner(
     owner_data: OwnerCreate,
     db: Session = Depends(get_db)
@@ -205,6 +228,7 @@ async def create_owner(
         email=owner_data.email,
         name=owner_data.name,
         domain=owner_data.domain,
+        company=owner_data.company,
         password_hash=hash_password(owner_data.password)
     )
     
@@ -212,17 +236,9 @@ async def create_owner(
     db.commit()
     db.refresh(owner)
     
-    return OwnerResponse(
-        id=owner.id,
-        email=owner.email,
-        name=owner.name,
-        domain=owner.domain,
-        is_active=owner.is_active,
-        is_verified=owner.is_verified,
-        monthly_submission_limit=owner.monthly_submission_limit,
-        monthly_submissions_used=owner.monthly_submissions_used,
-        created_at=owner.created_at
-    )
+    return {
+        "owner_data": owner_data
+    }
 
 @app.get("/api/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
@@ -248,6 +264,63 @@ async def get_owner(
         monthly_submissions_used=owner.monthly_submissions_used,
         created_at=owner.created_at
     )
+
+# -- DELETE OWNER
+
+# -- GET PLAN USAGE
+
+# -- UPGRADE/CHANGE PLAN
+
+# -- SAVE SETTINGS
+
+@app.post("/api/forgot-password") # PUBLIC
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Initiate password reset process by sending reset token to owner's email
+    """
+    owner = db.query(Owner).filter(Owner.email == request.email).first()
+
+    if not owner:
+        return {"message": "If an account with that email exists, a reset link has been sent."}
+    
+    reset_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=1)
+    
+    owner.reset_token = reset_token
+    owner.token_expiration = expires_at
+    db.commit()
+    
+    print(send_reset_email(request.email, reset_token))
+    
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+@app.post("/api/reset-password") # PRIVATE - TOKEN
+async def reset_password(
+    request: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Reset password using the provided token
+    """
+    owner = db.query(Owner).filter(Owner.email == request.email).first()
+    reset_token = owner.reset_token == request.token
+    
+    if not reset_token or datetime.now(timezone.utc) > owner.token_expiration:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    
+    new_pword_hash = hash_password(request.new_password)
+    owner.password_hash = new_pword_hash
+    
+    owner.reset_token = None
+    owner.token_expiration = None
+    db.commit()
+    
+    return {
+        "detail": "Successfully reset password"
+    }
 
 
 # ---------- API KEY ENDPOINTS ----------
@@ -590,14 +663,32 @@ async def get_submission_stats(
         "success_rate": round((successful / total * 100) if total > 0 else 0, 2)
     }
     
-    
+# -- DELETE SUBMISSION
+
+# -- CREATE WATERMARK
+
+# -- GET WATERMARKS
+
+# -- DELETE WATERMARK
+
+
 # ---------- LOG IN ENDPOINTS ----------
 
 # LOG IN
-
-# LOG OUT
+@app.post("/api/auth/login")
+async def login(
+    login_data: OwnerLogin,
+    db: Session = Depends(get_db)
+):
+    """Email and password (2FA??)"""
+    owner = db.query(Owner).filter(Owner.email == login_data.email).first()
+    if not owner or not verify_password(login_data.password, owner.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
     
-
+    return {
+        "email": login_data.email,
+        "name": owner.name
+    }
     
     
 if __name__ == "__main__":

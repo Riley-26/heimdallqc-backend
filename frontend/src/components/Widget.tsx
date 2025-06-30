@@ -37,8 +37,8 @@ export const HMDLWidget: React.FC<WidgetProps> = ({
                 <ThemeProvider theme={theme}>
                     <div className={`${styles[themeClass] || ""} ${styles.widgetMain} ${styles.widgetMainColl}`}>
                         <div className={`${styles[themeClass] || ""} ${styles.widgetBody}`}>
-                            <div style={{ display: "flex", alignItems: "center", marginRight: "12px" }}>
-                                <button className={styles.widgetArrow} onClick={() => { onOpen?.() }} ><ArrowBackIos style={{ color: `#${ themeClass === "dark" ? "bbb" : "444" }`, cursor: "pointer", marginLeft: "12px" }}/></button>
+                            <div style={{ display: "flex", alignItems: "center", padding: "12px" }}>
+                                <button className={styles.widgetArrow} onClick={() => { onOpen?.() }} ><ArrowBackIos style={{ color: `#${ themeClass === "dark" ? "bbb" : "444" }`, cursor: "pointer" }}/></button>
                                 <Logo colourMode={themeClass} />
                             </div>
                         </div>

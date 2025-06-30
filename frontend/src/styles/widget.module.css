@@ -33,11 +33,12 @@
     flex-direction: column;
     border-radius: 4px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    border: 1px solid #ddddddcc;
+    border: 1px solid rgb(150,150,150);
 }
 
 .widgetMainColl {
-    width: 100%;
+    max-width: max-content;
+    margin: 0 auto;
 }
 
 /* Widget Head */
@@ -55,7 +56,7 @@
 .widgetBody {
     width: 100%;
     height: 100%;
-    background: #bbb;
+    background: radial-gradient(circle at center,rgba(200, 200, 200, 1) 0%,rgba(165, 165, 165, 1) 100%);
     z-index: 99;
     display: flex;
     justify-content: space-around;
@@ -189,13 +190,12 @@
     justify-content: center;
     gap: 8px;
     text-align: center;
-    background: #bbb;
-    border: 1px solid #ddddddcc;
+    background: radial-gradient(circle at center,rgba(200, 200, 200, 1) 0%,rgba(165, 165, 165, 1) 100%);
     margin-bottom: 8px;
     padding: 8px 16px;
     border-radius: 4px;
     position: relative;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgb(150,150,150);
 }
 
 .widgetAlert span {
@@ -210,11 +210,11 @@
 */
 
 .dark.widgetBody {
-    background: #363636;
+    background: radial-gradient(circle at center,rgba(40, 40, 40, 1) 0%,rgba(35, 35, 35, 1) 100%);
 }
 
 .dark.widgetMain {
-    border: 1px solid #454545cc;
+    border: 1px solid rgb(30,30,30);
 }
 
 .dark.widgetForm span,
@@ -246,8 +246,8 @@
 }
 
 .dark.widgetAlert {
-    background: #363636;
-    border: 1px solid #454545cc;
+    background: radial-gradient(circle at center,rgba(40, 40, 40, 1) 0%,rgba(35, 35, 35, 1) 100%);
+    border: 1px solid rgb(30,30,30);
 }
 
 .dark.widgetAlert span {
