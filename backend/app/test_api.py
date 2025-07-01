@@ -111,6 +111,22 @@ def test_get_submissions(owner_id, submission_id = None):
         print(f"Error: {response.text}")
         return None
     
+
+# ---------- VERIFIED SITES TEST ----------
+
+def test_get_verif_sites(domain):
+    url = f"{BASE_URL}/api/verif-checker"
+    
+    response = requests.get(url)
+    print(f"Status Code: {response.status_code}")
+    print(f"Response: {response.json()}")
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error: {response.text}")
+        return None
+    
     
 if __name__ == "__main__":
     #test_create_owner()
@@ -123,4 +139,6 @@ if __name__ == "__main__":
     
     #test_create_submission("1gRXpe1ARPzRHzCnoZGYGJznt3SHDYe1as3My2FBRdWe7kQY")
     
-    test_get_submissions(1, 4)
+    #test_get_submissions(1, 4)
+    
+    test_get_verif_sites("localhost")

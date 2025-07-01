@@ -14,10 +14,10 @@ from passlib.context import CryptContext
 from urllib.parse import urlparse
 
 from .db.database import get_db
-from .models.owner import Owner
+from .models.owner import Owner, Verified_site
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest
+from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
 from .schemas.submission import SubmissionCreate, SubmissionResponse, SubmissionDetailResponse
 
@@ -39,11 +39,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health check endpoint
+# Health endpoints
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "message": "Widget Hook API is running"}
+    return {"status": "ok", "message": "Heimdall is running"}
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -52,6 +52,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 	content = {'status_code': 10422, 'message': exc_str, 'data': None}
 	return JSONResponse(content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
+@app.get("/site-status")
+async def site_status():
+    status_types = {
+        "functioning": "green",
+        "partial": "amber",
+        "error": "red"
+    }
+    
+    # DIAGNOSTICS CHECK
+    
+    status = {
+        "e_package": status_types["functioning"],
+        "i_package": status_types["functioning"],
+        "verif_checker": status_types["functioning"],
+        "watermarking": status_types["functioning"],
+        "contact": status_types["functioning"],
+    }
+    
+    return status
 
 # ---------- AUTHORISATION ----------
 
@@ -84,7 +103,6 @@ def send_reset_email(email: str, reset_token: str):
         "reset_token": reset_token,
         "reset_link": f"http://localhost:3000/signin/reset-password?token={reset_token}"
     }
-        
 
 # ---------- PASSWORD HASHING ----------
 
@@ -201,6 +219,27 @@ async def process_submission_background(submission_id: int):
 
 # -- VERIF CHECKER
 
+@app.get("/api/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
+async def check_verified_site(
+    site_link: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Check if site is verified
+    """
+    verif_site = db.query(Verified_site).filter(Verified_site.domain == site_link).first()
+    if not verif_site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    
+    return SiteResponse(
+        domain=verif_site.domain,
+        id=verif_site.id,
+        is_active=verif_site.is_active,
+        total_requests=verif_site.total_requests,
+        last_used_at=verif_site.last_used_at,
+        created_at=verif_site.created_at
+    )
+    
 # -- ANALYTICS
 
 
@@ -223,22 +262,41 @@ async def create_owner(
     if existing_owner:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Create new owner
-    owner = Owner(
-        email=owner_data.email,
-        name=owner_data.name,
-        domain=owner_data.domain,
-        company=owner_data.company,
-        password_hash=hash_password(owner_data.password)
-    )
+    verified_site = await create_verif_site(owner_data.domain, db)
     
-    db.add(owner)
-    db.commit()
-    db.refresh(owner)
+    if verified_site:
+        # Create new owner
+        owner = Owner(
+            domain_id=verified_site.id,
+            email=owner_data.email,
+            name=owner_data.name,
+            domain=owner_data.domain,
+            company=owner_data.company,
+            password_hash=hash_password(owner_data.password)
+        )
+        
+        db.add(owner)
+        db.commit()
+        db.refresh(owner)
     
     return {
-        "owner_data": owner_data
+        "owner_data": owner_data,
+        "domain": owner_data.domain
     }
+     
+async def create_verif_site(domain, db):
+    """
+    Create a verified site
+    """
+    verif_site = Verified_site(
+        domain=domain
+    )
+    
+    db.add(verif_site)
+    db.commit()
+    db.refresh(verif_site)
+    
+    return verif_site
 
 @app.get("/api/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
