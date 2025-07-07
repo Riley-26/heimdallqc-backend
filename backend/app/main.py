@@ -119,37 +119,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ---------- PROCESSING/HELPER FUNCTIONS ----------
 
-# Text processing function
-async def process_text(text: str) -> dict:
-    """
-    Process the submitted text and determine if it meets requirements.
-    
-    Args:
-        text: The text to process
-        
-    Returns:
-        Dict with processed results and validation status
-    """
-    await asyncio.sleep(1)
-    
-    word_count = len(text.split())
-    
-    meets_requirements = word_count >= 5
-    
-    score = word_count
-    
-    result = {
-        "word_count": word_count,
-        "processed_successfully": True,
-        "meets_requirements": meets_requirements,
-        "score": score,
-        "analysis": {
-            "sentiment": "positive" if "good" in text.lower() else "neutral",
-        }
-    }
-    
-    return result
-
 # Helper function to authenticate API key
 async def authenticate_api_key(api_key: str, db: Session) -> ApiKey:
     """Authenticate and return the API key object"""
@@ -168,6 +137,25 @@ async def authenticate_api_key(api_key: str, db: Session) -> ApiKey:
     
     return api_key_obj
 
+# Text processing function
+async def process_text(text: str) -> dict:
+    """
+    Process the submitted text and determine if it meets requirements.
+    
+    Args:
+        text: The text to process
+        
+    Returns:
+        Dict with processed results and validation status
+    """
+    
+    # ANALYSIS
+    
+    return {
+        "result": 0.5,
+        "text": text
+    }
+
 # Background processing function
 async def process_submission_background(submission_id: int):
     """Process submission in background after timeout"""
@@ -185,7 +173,7 @@ async def process_submission_background(submission_id: int):
         
         # Process without time pressure
         try:
-            processing_result = await process_text(submission.text)
+            processing_result = await process_text(submission.orig_text)
             
             # Update submission with results
             submission.processing_result = processing_result
@@ -216,8 +204,6 @@ async def process_submission_background(submission_id: int):
 # -- AUTO-CITATION
 
 # -- AI REWRITE
-
-# -- VERIF CHECKER
 
 @app.get("/api/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
 async def check_verified_site(
@@ -283,7 +269,7 @@ async def create_owner(
         "owner_data": owner_data,
         "domain": owner_data.domain
     }
-     
+
 async def create_verif_site(domain, db):
     """
     Create a verified site
@@ -397,13 +383,10 @@ async def create_api_key(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    # Check if API key name already exists for this owner
-    existing_key = db.query(ApiKey).filter(
-        ApiKey.owner_id == owner_id,
-        ApiKey.name == api_key_data.name
-    ).first()
-    if existing_key:
-        raise HTTPException(status_code=400, detail="API key name already exists for this owner")
+    # Check if API key already exists for this owner
+    existing_keys = db.query(ApiKey).filter(
+        ApiKey.owner_id == owner_id
+    ).all()
     
     # Generate new API key
     api_key = ApiKey(
@@ -411,6 +394,10 @@ async def create_api_key(
         name=api_key_data.name,
         key=ApiKey.generate_key()
     )
+    
+    if len(existing_keys) > 0 and api_key:
+        for i in existing_keys:
+            i.is_active = False
     
     db.add(api_key)
     db.commit()
@@ -427,8 +414,8 @@ async def create_api_key(
         created_at=api_key.created_at
     )
 
-@app.get("/api/owners/{owner_id}/api-keys") # PRIVATE - LOGIN
-async def list_api_keys(
+@app.get("/api/owners/{owner_id}/api-key") # PRIVATE - LOGIN
+async def list_api_key(
     owner_id: int,
     db: Session = Depends(get_db)
 ):
@@ -440,7 +427,7 @@ async def list_api_keys(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner_id).all()
+    api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner_id).first()
     
     # Return masked keys for security
     return [
@@ -457,7 +444,7 @@ async def list_api_keys(
     ]
 
 @app.delete("/api/api-keys/{api_key_id}") # PRIVATE - LOGIN
-async def delete_api_key(
+async def deactivate_api_key(
     api_key_id: int,
     db: Session = Depends(get_db)
 ):
@@ -496,12 +483,16 @@ async def create_submission(
     submission = Submission(
         owner_id=api_key_obj.owner_id,
         api_key_id=api_key_obj.id,
-        text=submission_data.text,
-        text_length=len(submission_data.text),
+        orig_text=submission_data.orig_text,
+        orig_text_length=len(submission_data.orig_text),
+        edit_text=submission_data.edit_text,
+        edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
         custom_id=submission_data.custom_id,
-        questionResult=submission_data.questionResult,
+        questionResult=submission_data.question_result,
         domain=submission_data.domain,
-        status=ProcessingStatus.PENDING
+        status=ProcessingStatus.PENDING,
+        manual_upload=False,
+        action_needed=submission_data.action_needed
     )
     
     db.add(submission)
@@ -515,20 +506,24 @@ async def create_submission(
         
         # Try processing with 3-second timeout
         processing_result = await asyncio.wait_for(
-            process_text(submission_data.text),
+            process_text(submission_data.orig_text),
             timeout=3.0
         )
         
-        # Processing completed within 3 seconds!
+        # Processing completed within 3 seconds
         submission.processing_result = processing_result
-        submission.meets_requirements = processing_result.get("meets_requirements", False)
+        submission.meets_requirements = type(processing_result["result"]) == float
         
         if submission.meets_requirements:
             submission.update_status(ProcessingStatus.SUCCESS)
             message = "Success! Your submission has been processed."
         else:
-            submission.update_status(ProcessingStatus.FAILED, "Text does not meet requirements")
-            message = "Your submission was processed but doesn't meet our requirements."
+            submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
+            message = "Your submission has failed to process."
+            
+        # Update when action is needed
+        if processing_result["result"] > 0.4:
+            submission.update_action(True)
         
         db.commit()
         db.refresh(submission)
@@ -536,8 +531,9 @@ async def create_submission(
         return SubmissionResponse(
             id=submission.id,
             status=submission.status,
-            text_length=submission.text_length,
+            orig_text_length=submission.orig_text_length,
             meets_requirements=submission.meets_requirements,
+            action_needed=submission.action_needed,
             failure_reason=submission.failure_reason,
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
@@ -555,8 +551,9 @@ async def create_submission(
         return SubmissionResponse(
             id=submission.id,
             status=submission.status,
-            text_length=submission.text_length,
+            orig_text_length=submission.orig_text_length,
             meets_requirements=None,
+            action_needed=submission.action_needed,
             failure_reason=None,
             created_at=submission.created_at,
             completed_processing_at=None,
@@ -571,7 +568,7 @@ async def create_submission(
         return SubmissionResponse(
             id=submission.id,
             status=submission.status,
-            text_length=submission.text_length,
+            orig_text_length=submission.orig_text_length,
             meets_requirements=False,
             failure_reason=submission.failure_reason,
             created_at=submission.created_at,
@@ -579,44 +576,123 @@ async def create_submission(
             message="Sorry, there was an error processing your submission. Please try again."
         )
 
-@app.get("/api/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
-async def get_submission_status(
-    submission_id: int, 
-    api_key: str,
+@app.post("/api/upload-submission", response_model=SubmissionResponse) # PRIVATE - LOGIN
+async def upload_submission(
+    submission_data: SubmissionCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Get the status of a submission by ID."""
-    # Authenticate API key
-    api_key_obj = await authenticate_api_key(api_key, db)
-    
-    # Get submission and verify ownership
-    submission = db.query(Submission).filter(
-        Submission.id == submission_id,
-        Submission.user_id == api_key_obj.user_id
+    """
+    Create submission via upload
+    """
+    key = db.query(ApiKey).filter(
+        ApiKey.owner_id == submission_data.owner_id,
+        ApiKey.is_active == True
     ).first()
     
-    if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
-    
-    # Determine appropriate message based on status
-    message_map = {
-        ProcessingStatus.PENDING: "Submission is queued for processing",
-        ProcessingStatus.PROCESSING: "Submission is currently being processed",
-        ProcessingStatus.SUCCESS: "Submission processed successfully",
-        ProcessingStatus.FAILED: f"Submission failed: {submission.failure_reason}",
-        ProcessingStatus.TIMEOUT: "Submission is being processed in background"
-    }
-    
-    return SubmissionResponse(
-        id=submission.id,
-        status=submission.status,
-        text_length=submission.text_length,
-        meets_requirements=submission.meets_requirements,
-        failure_reason=submission.failure_reason,
-        created_at=submission.created_at,
-        completed_processing_at=submission.completed_processing_at,
-        message=message_map.get(submission.status, "Status unknown")
+    # Create submission record
+    submission = Submission(
+        owner_id=submission_data.owner_id,
+        api_key_id=key.id,
+        orig_text=submission_data.orig_text,
+        orig_text_length=len(submission_data.orig_text),
+        edit_text=submission_data.edit_text,
+        edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
+        custom_id=submission_data.custom_id,
+        question_result=submission_data.question_result,
+        domain=submission_data.domain,
+        status=ProcessingStatus.PENDING,
+        manual_upload=True,
+        action_needed=submission_data.action_needed
     )
+    
+    db.add(submission)
+    db.commit()
+    db.refresh(submission)
+    
+    try:
+        # Update status to processing
+        submission.update_status(ProcessingStatus.PROCESSING)
+        db.commit()
+        
+        # Try processing with 3-second timeout
+        processing_result = await asyncio.wait_for(
+            process_text(submission_data.orig_text),
+            timeout=3.0
+        )
+        
+        # Processing completed within 3 seconds
+        submission.processing_result = processing_result
+        submission.meets_requirements = type(processing_result["result"]) == float
+        
+        if submission.meets_requirements:
+            submission.update_status(ProcessingStatus.SUCCESS)
+            message = "Success! Your submission has been processed."
+        else:
+            submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
+            message = "Your submission has failed to process."
+            
+        if processing_result["result"] > 0.4:
+            submission.update_action(True)
+        
+        db.commit()
+        db.refresh(submission)
+        
+        return SubmissionResponse(
+            owner_id=submission_data.owner_id,
+            id=submission.id,
+            status=submission.status,
+            orig_text_length=submission.orig_text_length,
+            meets_requirements=submission.meets_requirements,
+            action_needed=submission.action_needed,
+            failure_reason=submission.failure_reason,
+            created_at=submission.created_at,
+            completed_processing_at=submission.completed_processing_at,
+            message=message,
+            manual_upload=True
+        )
+        
+    except asyncio.TimeoutError:
+        # Processing is taking longer than 3 seconds
+        submission.update_status(ProcessingStatus.TIMEOUT)
+        db.commit()
+        
+        # Continue processing in background
+        background_tasks.add_task(process_submission_background, submission.id)
+        
+        return SubmissionResponse(
+            owner_id=submission_data.owner_id,
+            id=submission.id,
+            status=submission.status,
+            orig_text_length=submission.orig_text_length,
+            meets_requirements=None,
+            action_needed=submission.action_needed,
+            failure_reason=None,
+            created_at=submission.created_at,
+            completed_processing_at=None,
+            message="Thank you for your submission! We're processing it now and will notify the website owner when complete.",
+            manual_upload=True
+        )
+        
+    except Exception as e:
+        # Error occurred within 3 seconds - user is still there
+        submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
+        db.commit()
+        
+        return SubmissionResponse(
+            owner_id=submission_data.owner_id,
+            id=submission.id,
+            status=submission.status,
+            orig_text_length=submission.orig_text_length,
+            meets_requirements=False,
+            action_needed=submission.action_needed,
+            failure_reason=submission.failure_reason,
+            created_at=submission.created_at,
+            completed_processing_at=submission.completed_processing_at,
+            message="Sorry, there was an error processing your submission. Please try again.",
+            manual_upload=True
+        )
 
 @app.get("/api/owners/{owner_id}/submissions") # PRIVATE - LOGIN
 async def list_owner_submissions(
@@ -647,10 +723,16 @@ async def list_owner_submissions(
         {
             "id": sub.id,
             "status": sub.status,
-            "text_preview": sub.text[:100] + "..." if len(sub.text) > 100 else sub.text,
-            "text_length": sub.text_length,
+            "processing_result": sub.processing_result,
+            "orig_text_preview": sub.orig_text[:80] + "..." if len(sub.orig_text) > 80 else sub.orig_text,
+            "orig_text_length": sub.orig_text_length,
+            "edit_text_preview": sub.edit_text[:80] + "..." if sub.edit_text and len(sub.edit_text) > 80 else sub.edit_text,
+            "edit_text_length": sub.edit_text_length,
             "meets_requirements": sub.meets_requirements,
+            "manual_upload": sub.manual_upload,
+            "action_needed": sub.action_needed,
             "domain": sub.domain,
+            "page_link": sub.page_link,
             "created_at": sub.created_at
         }
         for sub in submissions
@@ -673,16 +755,21 @@ async def get_submission_detail(
         raise HTTPException(status_code=404, detail="Submission not found")
     
     return SubmissionDetailResponse(
+        owner_id=submission.owner_id,
         id=submission.id,
         status=submission.status,
-        text=submission.text,
-        text_length=submission.text_length,
+        orig_text=submission.orig_text,
+        orig_text_length=submission.orig_text_length,
+        edit_text=submission.edit_text,
+        edit_text_length=submission.edit_text_length,
         meets_requirements=submission.meets_requirements,
+        action_needed=submission.action_needed,
         failure_reason=submission.failure_reason,
         processing_result=submission.processing_result,
         domain=submission.domain,
         created_at=submission.created_at,
         completed_processing_at=submission.completed_processing_at,
+        manual_upload=submission.manual_upload,
         message="Submission details retrieved successfully"
     )
 
@@ -721,6 +808,46 @@ async def get_submission_stats(
         "success_rate": round((successful / total * 100) if total > 0 else 0, 2)
     }
     
+@app.get("/api/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
+async def get_submission_status(
+    submission_id: int, 
+    api_key: str,
+    db: Session = Depends(get_db)
+):
+    """Get the status of a submission by ID."""
+    # Authenticate API key
+    api_key_obj = await authenticate_api_key(api_key, db)
+    
+    # Get submission and verify ownership
+    submission = db.query(Submission).filter(
+        Submission.id == submission_id,
+        Submission.user_id == api_key_obj.user_id
+    ).first()
+    
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    # Determine appropriate message based on status
+    message_map = {
+        ProcessingStatus.PENDING: "Submission is queued for processing",
+        ProcessingStatus.PROCESSING: "Submission is currently being processed",
+        ProcessingStatus.SUCCESS: "Submission processed successfully",
+        ProcessingStatus.FAILED: f"Submission failed: {submission.failure_reason}",
+        ProcessingStatus.TIMEOUT: "Submission is being processed in background"
+    }
+    
+    return SubmissionResponse(
+        id=submission.id,
+        status=submission.status,
+        orig_text_length=submission.orig_text_length,
+        edit_text_length=submission.edit_text_length,
+        meets_requirements=submission.meets_requirements,
+        failure_reason=submission.failure_reason,
+        created_at=submission.created_at,
+        completed_processing_at=submission.completed_processing_at,
+        message=message_map.get(submission.status, "Status unknown")
+    )
+    
 # -- DELETE SUBMISSION
 
 # -- CREATE WATERMARK
@@ -745,7 +872,8 @@ async def login(
     
     return {
         "email": login_data.email,
-        "name": owner.name
+        "name": owner.name,
+        "id": owner.id
     }
     
     

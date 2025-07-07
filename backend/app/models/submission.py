@@ -25,19 +25,24 @@ class Submission(Base):
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=False, index=True)
     
     # Content
-    text = Column(Text, nullable=False)
-    text_length = Column(Integer, nullable=False)
+    orig_text = Column(Text, nullable=False)
+    orig_text_length = Column(Integer, nullable=False)
+    edit_text = Column(Text, nullable=True)
+    edit_text_length = Column(Integer, nullable=True)
     custom_id = Column(Integer, nullable=True)
-    questionResult = Column(Boolean, nullable=False)
+    question_result = Column(Boolean, nullable=False)
+    manual_upload = Column(Boolean, nullable=False)
     
     # Processing
     status = Column(String(50), default=ProcessingStatus.PENDING, index=True)
     processing_result = Column(JSON, nullable=True)
     meets_requirements = Column(Boolean, nullable=True)
     failure_reason = Column(String(500), nullable=True)
+    action_needed = Column(Boolean, nullable=False)
     
     # Basic tracking
     domain = Column(String(1000), nullable=True)
+    page_link = Column(String(1000), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -69,3 +74,8 @@ class Submission(Base):
         
         if reason:
             self.failure_reason = reason
+            
+    def update_action(self, action: bool):
+        """Action needed"""
+        if self.action_needed != action:
+            self.action_needed = action

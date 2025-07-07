@@ -5,14 +5,19 @@ from enum import Enum
 import enum
 
 class SubmissionBase(BaseModel):
-    text: str = Field(..., min_length=1, max_length=10000)
+    orig_text: str = Field(..., min_length=1, max_length=10000)
+    edit_text: Optional[str] = Field(None, max_length=10000)
     domain: Optional[str] = Field(None, max_length=1000)
-    custom_id: Optional[int] = None,
-    questionResult: bool
+    page_link: Optional[str] = Field(None, max_length=1000)
+    custom_id: Optional[int] = None
+    question_result: Optional[bool] = None
+    manual_upload: bool = False
+    action_needed: bool = False
 
 class SubmissionCreate(SubmissionBase):
+    owner_id: Optional[int] = None
     
-    @field_validator('text')
+    @field_validator('orig_text', 'edit_text')
     def validate_text(cls, v):
         # Remove excessive whitespace
         cleaned = ' '.join(v.split())
@@ -23,13 +28,16 @@ class SubmissionCreate(SubmissionBase):
 
 class SubmissionResponse(BaseModel):
     id: int
+    owner_id: int
     status: str
-    text_length: int
+    orig_text_length: int
     meets_requirements: Optional[bool] = None
+    action_needed: bool
     failure_reason: Optional[str] = None
     created_at: datetime
     completed_processing_at: Optional[datetime] = None
     message: Optional[str] = None
+    manual_upload: bool
 
     class Config:
         field_attributes = True
@@ -37,9 +45,12 @@ class SubmissionResponse(BaseModel):
 
 class SubmissionDetailResponse(SubmissionResponse):
     """More detailed response for admin/owner views"""
-    text: str
+    orig_text: str
+    edit_text: Optional[str]
     processing_result: Optional[Dict[str, Any]] = None
     domain: Optional[str] = None
+    page_link: Optional[str] = None
+    action_needed: bool
 
     class Config:
         field_attributes = True
@@ -49,10 +60,14 @@ class SubmissionListResponse(BaseModel):
     """Simplified response for listing submissions"""
     id: int
     status: str
-    text_preview: str = Field(..., description="First 100 characters of text")
-    text_length: int
+    orig_text_preview: str = Field(..., description="First 100 characters of text")
+    orig_text_length: int
+    edit_text_preview: Optional[str] = Field(..., description="First 100 characters of text")
+    edit_text_length: Optional[int]
     meets_requirements: Optional[bool] = None
+    action_needed: bool
     domain: Optional[str] = None
+    page_link: Optional[str] = None
     created_at: datetime
 
     class Config:
