@@ -1,5 +1,6 @@
 import requests
 import json
+from app.main import ai_analysis, plag_analysis, redact_text, ai_rewrite, auto_cite
 
 # Base URL for your API
 BASE_URL = "http://localhost:8000"
@@ -141,4 +142,69 @@ if __name__ == "__main__":
     
     #test_get_submissions(1, 4)
     
-    test_get_verif_sites("localhost")
+    #test_get_verif_sites("localhost")
+    
+    text = """
+        In making a trench, soil from the excavation is used to create raised parapets running both in front of and behind the trench. Within the trench are firing positions along a raised forward step called a fire step, and duckboards are placed on the often muddy bottom of the trench to provide secure footing.
+    """
+    
+    reworded = """
+        When constructing a trench, the excavated soil is piled up to form raised parapets on both the front and rear sides of the trench. Inside the trench, firing positions are established along a raised forward ledge known as a fire step, while duckboards are laid on the frequently muddy floor to ensure firm footing.
+    """
+    
+    sources = [
+        {
+            "score": 100,
+            "canAccess": True,
+            "totalNumberOfWords": 54,
+            "plagiarismWords": 54,
+            "identicalWordCounts": 54,
+            "similarWordCounts": 0,
+            "url": "https://www.britannica.com/topic/trench-warfare",
+            "author": "unknown",
+            "description": "Trench warfare is combat in which armies attack, counterattack, and defend from relatively permanent ...",
+            "title": "Trench warfare | Definition, History, Images, & Facts | Britannica",
+            "publishedDate": 1747353600000,
+            "source": "britannica.com",
+            "citation": False,
+            "plagiarismFound": [
+                {
+                    "startIndex": 9,
+                    "endIndex": 320,
+                    "sequence": "in making a trench, soil from the excavation is used to create raised parapets running both in front of and behind the trench. within the trench are firing positions along a raised forward step called a fire step, and duckboards are placed on the often muddy bottom of the trench to provide secure footing.     "
+                }
+            ],
+            "is_excluded": False,
+            "similarWords": []
+        },
+        {
+            "score": 100,
+            "canAccess": True,
+            "totalNumberOfWords": 54,
+            "plagiarismWords": 54,
+            "identicalWordCounts": 54,
+            "similarWordCounts": 0,
+            "url": "https://janae23worldhistory.weebly.com/world-war-one.html",
+            "author": "unknown",
+            "description": "The worlds first global conflict, the Great War pitted the Central Powers of Germany, Austria-Hun ...",
+            "title": "World War One ",
+            "publishedDate": "unknown",
+            "source": "janae23worldhistory.weebly.com",
+            "citation": False,
+            "plagiarismFound": [
+                {
+                    "startIndex": 9,
+                    "endIndex": 320,
+                    "sequence": "in making a trench, soil from the excavation is used to create raised parapets running both in front of and behind the trench. within the trench are firing positions along a raised forward step called a fire step, and duckboards are placed on the often muddy bottom of the trench to provide secure footing.     "
+                }
+            ],
+            "is_excluded": False,
+            "similarWords": []
+        }
+    ]
+    
+    #print(ai_analysis(reworded))
+    #print(plag_analysis(reworded))
+    #print(redact_text(text, []))
+    #print(ai_rewrite(text))
+    print(auto_cite(text, sources))

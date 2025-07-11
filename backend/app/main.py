@@ -12,6 +12,9 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from passlib.context import CryptContext
 from urllib.parse import urlparse
+import requests
+import os
+import json
 
 from .db.database import get_db
 from .models.owner import Owner, Verified_site
@@ -19,7 +22,7 @@ from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
 from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
-from .schemas.submission import SubmissionCreate, SubmissionResponse, SubmissionDetailResponse
+from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse
 
 
 # Create FastAPI application
@@ -150,9 +153,16 @@ async def process_text(text: str) -> dict:
     """
     
     # ANALYSIS
+    ai_result = ai_analysis(text)
+    plag_result = plag_analysis(text)
+    
+    # CHECK PREFERENCES FOR TEXT EDITS
+    print(ai_result)
+    print(plag_result)
     
     return {
-        "result": 0.5,
+        "ai_result": ai_result,
+        "plag_result": plag_result,
         "text": text
     }
 
@@ -198,12 +208,115 @@ async def process_submission_background(submission_id: int):
 # ---------- ANALYSIS FUNCTIONS ----------
 
 # -- AI ANALYSIS
+def ai_analysis(text: str):
+    winston_url = "https://api.gowinston.ai/v2/ai-content-detection"
+    key = os.getenv("WINST_KEY")
+    
+    payload = {
+        "text": text,
+        "version": "latest",
+        "sentences": True,
+        "language": "auto"
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
+    }
+    
+    response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
+    red_response = {
+        "status": response["status"],
+        "score": round(100 - response["score"]),
+        "credits": response["credits_used"]
+    }
+    
+    return red_response
 
 # -- PLAGIARISM ANALYSIS
+def plag_analysis(text: str):
+    winston_url = "https://api.gowinston.ai/v2/plagiarism"
+    key = os.getenv("WINST_KEY")
+    
+    payload = {
+        "text": text
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
+    }
+    
+    response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
+    red_response = {
+        "status": response["status"],
+        "score": response["result"]["score"],
+        "sources": [
+            {
+                "score": round(i["score"]),
+                "can_access": i["canAccess"],
+                "url": i["url"],
+                "citation": i["citation"],
+                "sections": [
+                    {
+                        "startIndex": j["startIndex"],
+                        "endIndex": j["endIndex"],
+                        "sequence": j["sequence"]
+                    }
+                    for j in i["plagiarismFound"]
+                ]
+            }
+            for i in response["sources"][:2] if i["score"] >= 80
+        ],
+        "credits": response["credits_used"]
+    }
+    
+    return red_response
 
 # -- AUTO-CITATION
+def auto_cite(text: str, sources: list):
+    new_text = text
+    for i in sources:
+        for j in i["plagiarismFound"]:
+            new_text = new_text[0:j["startIndex"]] + "\"" + new_text[j["startIndex"]:j["endIndex"]] + "\""
+    
+    return {
+        "cited_text": new_text,
+        "sources": [{
+            "url": i["url"],
+            "text": [j["sequence"] for j in i["plagiarismFound"]],
+            "startIndex": [j["startIndex"] for j in i["plagiarismFound"]],
+            "endIndex": [j["endIndex"] for j in i["plagiarismFound"]]
+        } for i in sources]
+    }
 
 # -- AI REWRITE
+def ai_rewrite(text: str):
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("GPT_KEY"))
+
+    response = client.responses.create(
+        model="gpt-4.1",
+        instructions="",
+        input=f"""
+            Rewrite my original text:
+            
+            "{text}"
+            
+            Output only the text.
+        """
+    )
+
+    return response
+
+# -- REDACTED
+def redact_text(text: str, sections: list):
+    new_text = text
+    for i in sections:
+        if i in new_text:
+            new_text = new_text.replace(i, "[REDACTED]")
+
+    return new_text
 
 @app.get("/api/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
 async def check_verified_site(
@@ -492,7 +605,8 @@ async def create_submission(
         domain=submission_data.domain,
         status=ProcessingStatus.PENDING,
         manual_upload=False,
-        action_needed=submission_data.action_needed
+        action_needed=submission_data.action_needed,
+        edited=submission_data.edited
     )
     
     db.add(submission)
@@ -522,7 +636,7 @@ async def create_submission(
             message = "Your submission has failed to process."
             
         # Update when action is needed
-        if processing_result["result"] > 0.4:
+        if processing_result["ai_result"]["result"]["score"] <= 60 or processing_result["plag_result"]["result"]["score"] >= 60:
             submission.update_action(True)
         
         db.commit()
@@ -604,7 +718,8 @@ async def upload_submission(
         domain=submission_data.domain,
         status=ProcessingStatus.PENDING,
         manual_upload=True,
-        action_needed=submission_data.action_needed
+        action_needed=submission_data.action_needed,
+        edited=submission_data.edited
     )
     
     db.add(submission)
@@ -623,8 +738,9 @@ async def upload_submission(
         )
         
         # Processing completed within 3 seconds
-        submission.processing_result = processing_result
-        submission.meets_requirements = type(processing_result["result"]) == float
+        submission.ai_result = processing_result["ai_result"]
+        submission.plag_result = processing_result["plag_result"]
+        submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
         
         if submission.meets_requirements:
             submission.update_status(ProcessingStatus.SUCCESS)
@@ -633,7 +749,7 @@ async def upload_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Your submission has failed to process."
             
-        if processing_result["result"] > 0.4:
+        if processing_result["plag_result"]["result"]["score"] >= 60:
             submission.update_action(True)
         
         db.commit()
@@ -723,7 +839,8 @@ async def list_owner_submissions(
         {
             "id": sub.id,
             "status": sub.status,
-            "processing_result": sub.processing_result,
+            "ai_result": sub.ai_result,
+            "plag_result": sub.plag_result,
             "orig_text_preview": sub.orig_text[:80] + "..." if len(sub.orig_text) > 80 else sub.orig_text,
             "orig_text": sub.orig_text,
             "orig_text_length": sub.orig_text_length,
@@ -735,7 +852,9 @@ async def list_owner_submissions(
             "action_needed": sub.action_needed,
             "domain": sub.domain,
             "page_link": sub.page_link,
-            "created_at": sub.created_at
+            "created_at": sub.created_at,
+            "edited": sub.edited,
+            "edited_at": sub.edited_at
         }
         for sub in submissions
     ]
@@ -767,11 +886,11 @@ async def get_submission_detail(
         meets_requirements=submission.meets_requirements,
         action_needed=submission.action_needed,
         failure_reason=submission.failure_reason,
-        processing_result=submission.processing_result,
         domain=submission.domain,
         created_at=submission.created_at,
         completed_processing_at=submission.completed_processing_at,
         manual_upload=submission.manual_upload,
+        edited=submission.edited,
         message="Submission details retrieved successfully"
     )
 
@@ -850,7 +969,50 @@ async def get_submission_status(
         message=message_map.get(submission.status, "Status unknown")
     )
     
-# -- DELETE SUBMISSION
+@app.delete("/api/owners/{owner_id}/submissions/{submission_id}/delete-submission")
+async def delete_submission(
+    submission_id: int,
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
+    submission = db.query(Submission).filter(
+        Submission.id == submission_id,
+        Submission.owner_id == owner_id
+    ).first()
+    
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    db.delete(submission)
+    db.commit()
+    
+    return {
+        "message": "Successfully deleted submission"
+    }
+
+@app.post("/api/owners/{owner_id}/submissions/{submission_id}/edit-submission")
+async def edit_submission(
+    submission_data: SubmissionEdit,
+    db: Session = Depends(get_db)
+):
+    submission = db.query(Submission).filter(
+        Submission.id == submission_data.id,
+        Submission.owner_id == submission_data.owner_id
+    ).first()
+    
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission.edit_text = submission_data.new_text
+    submission.edit_text_length = len(submission_data.new_text)
+    submission.edited = True
+    submission.edited_at = datetime.now()
+    
+    db.commit()
+    
+    return {
+        "message": "Submission edited successfully"
+    }
 
 # -- CREATE WATERMARK
 

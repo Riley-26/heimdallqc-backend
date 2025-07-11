@@ -35,10 +35,13 @@ class Submission(Base):
     
     # Processing
     status = Column(String(50), default=ProcessingStatus.PENDING, index=True)
-    processing_result = Column(JSON, nullable=True)
     meets_requirements = Column(Boolean, nullable=True)
     failure_reason = Column(String(500), nullable=True)
     action_needed = Column(Boolean, nullable=False)
+    edited = Column(Boolean, nullable=False)
+    
+    ai_result = Column(JSON, nullable=True)
+    plag_result = Column(JSON, nullable=True)
     
     # Basic tracking
     domain = Column(String(1000), nullable=True)
@@ -47,6 +50,7 @@ class Submission(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     completed_processing_at = Column(DateTime(timezone=True), nullable=True)
+    edited_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     owner = relationship("Owner", backref="submissions")

@@ -13,6 +13,8 @@ class SubmissionBase(BaseModel):
     question_result: Optional[bool] = None
     manual_upload: bool = False
     action_needed: bool = False
+    edited: bool = False
+    edited_at: Optional[datetime] = None
 
 class SubmissionCreate(SubmissionBase):
     owner_id: Optional[int] = None
@@ -24,6 +26,11 @@ class SubmissionCreate(SubmissionBase):
         if len(cleaned) < 5:
             raise ValueError('Text must be at least 5 characters long after cleaning')
         return cleaned
+    
+class SubmissionEdit(BaseModel):
+    owner_id: Optional[int] = None
+    id: int
+    new_text: str
 
 
 class SubmissionResponse(BaseModel):
@@ -47,28 +54,13 @@ class SubmissionDetailResponse(SubmissionResponse):
     """More detailed response for admin/owner views"""
     orig_text: str
     edit_text: Optional[str]
-    processing_result: Optional[Dict[str, Any]] = None
+    ai_result: dict
+    plag_result: dict
     domain: Optional[str] = None
     page_link: Optional[str] = None
     action_needed: bool
-
-    class Config:
-        field_attributes = True
-
-
-class SubmissionListResponse(BaseModel):
-    """Simplified response for listing submissions"""
-    id: int
-    status: str
-    orig_text_preview: str = Field(..., description="First 100 characters of text")
-    orig_text_length: int
-    edit_text_preview: Optional[str] = Field(..., description="First 100 characters of text")
-    edit_text_length: Optional[int]
-    meets_requirements: Optional[bool] = None
-    action_needed: bool
-    domain: Optional[str] = None
-    page_link: Optional[str] = None
-    created_at: datetime
+    edited: bool
+    edited_at: Optional[datetime] = None
 
     class Config:
         field_attributes = True
