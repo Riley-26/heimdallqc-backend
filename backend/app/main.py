@@ -625,8 +625,9 @@ async def create_submission(
         )
         
         # Processing completed within 3 seconds
-        submission.processing_result = processing_result
-        submission.meets_requirements = type(processing_result["result"]) == float
+        submission.ai_result = processing_result["ai_result"]
+        submission.plag_result = processing_result["plag_result"]
+        submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
         
         if submission.meets_requirements:
             submission.update_status(ProcessingStatus.SUCCESS)
@@ -636,7 +637,7 @@ async def create_submission(
             message = "Your submission has failed to process."
             
         # Update when action is needed
-        if processing_result["ai_result"]["result"]["score"] <= 60 or processing_result["plag_result"]["result"]["score"] >= 60:
+        if processing_result["plag_result"]["result"]["score"] >= 60:
             submission.update_action(True)
         
         db.commit()
@@ -891,6 +892,8 @@ async def get_submission_detail(
         completed_processing_at=submission.completed_processing_at,
         manual_upload=submission.manual_upload,
         edited=submission.edited,
+        ai_result=submission.ai_result,
+        plag_result=submission.plag_result,
         message="Submission details retrieved successfully"
     )
 
