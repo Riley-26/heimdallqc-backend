@@ -1,9 +1,14 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Table, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Table, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
 
 class Plans:
+    NONE = {
+        "name": "none",
+        "tokens": 0,
+        "price": "£0"
+    }
     EXTRINSIC = {
         "name": "extrinsic",
         "tokens": 8000,
@@ -37,7 +42,7 @@ class Tokens:
         "tokens": 50000,
         "price": "£300"
     }
-
+    
 
 class Owner(Base):
     __tablename__ = "owners"
@@ -62,11 +67,22 @@ class Owner(Base):
     # Account status
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
-    plan = Column(String(20), nullable=False, default="extrinsic")
+    plan = Column(String(20), nullable=False, default="none")
+    function_pref = Column(JSON, nullable=False, default=lambda: {
+        "auto_cite": True,
+        "ai_rewrite": False,
+        "redact": False
+    })
+    ui_pref = Column(JSON, nullable=False, default=lambda : {
+        "widget": True,
+        "watermarks": True
+    })
     
     # Usage tracking
-    current_tokens = Column(Integer, default=Plans.EXTRINSIC["tokens"], nullable=False)
+    current_tokens = Column(Integer, default=Plans.NONE["tokens"], nullable=False)
+    tokens_used = Column(Integer, default=0, nullable=False)
     watermarks_made = Column(Integer, default=0, nullable=False)
+    plagiarisms_prevented = Column(Integer, default=0, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -80,6 +96,7 @@ class Owner(Base):
     
     def change_plan(self, new_plan):
         plan_dict = {
+            "none": Plans.NONE,
             "extrinsic": Plans.EXTRINSIC,
             "intrinsic": Plans.INTRINSIC,
             "combo": Plans.COMBO
@@ -106,6 +123,15 @@ class Owner(Base):
             self.current_tokens += pack_dict[pack]["tokens"]
             return pack_dict[pack]["price"]
         return None
+    
+    def update_prefs(self, new_prefs):
+        if not isinstance(new_prefs, dict):
+            raise ValueError("new_prefs must be a dictionary")
+        if self.preferences is None:
+            self.preferences = {}
+        for key, value in new_prefs.items():
+            if key in self.preferences:
+                self.preferences[key] = value
     
     
 class Verified_site(Base):

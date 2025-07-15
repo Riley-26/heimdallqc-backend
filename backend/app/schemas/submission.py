@@ -15,9 +15,12 @@ class SubmissionBase(BaseModel):
     action_needed: bool = False
     edited: bool = False
     edited_at: Optional[datetime] = None
+    function_pref: Optional[str] = None
 
 class SubmissionCreate(SubmissionBase):
     owner_id: Optional[int] = None
+    key_id: str
+    temp_text: Optional[str] = Field(None, max_length=10000)
     
     @field_validator('orig_text', 'edit_text')
     def validate_text(cls, v):
@@ -58,9 +61,10 @@ class SubmissionDetailResponse(SubmissionResponse):
     plag_result: dict
     domain: Optional[str] = None
     page_link: Optional[str] = None
-    action_needed: bool
     edited: bool
     edited_at: Optional[datetime] = None
+    function_pref: str
+    temp_text: Optional[str] = Field(None, max_length=10000)
 
     class Config:
         field_attributes = True

@@ -30,7 +30,7 @@ class Submission(Base):
     edit_text = Column(Text, nullable=True)
     edit_text_length = Column(Integer, nullable=True)
     custom_id = Column(Integer, nullable=True)
-    question_result = Column(Boolean, nullable=False)
+    question_result = Column(Boolean, nullable=True)
     manual_upload = Column(Boolean, nullable=False)
     
     # Processing
@@ -39,9 +39,11 @@ class Submission(Base):
     failure_reason = Column(String(500), nullable=True)
     action_needed = Column(Boolean, nullable=False)
     edited = Column(Boolean, nullable=False)
+    function_pref = Column(String(20), default="Auto-cite", nullable=True)
     
     ai_result = Column(JSON, nullable=True)
     plag_result = Column(JSON, nullable=True)
+    temp_text = Column(Text, nullable=True)
     
     # Basic tracking
     domain = Column(String(1000), nullable=True)

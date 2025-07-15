@@ -8,7 +8,7 @@ class OwnerBase(BaseModel):
     email: EmailStr
     name: str
     domain: str
-    company: str
+    company: str = None
     
     
 class OwnerCreate(OwnerBase):
@@ -31,9 +31,14 @@ class OwnerResponse(OwnerBase):
     domain: str
     is_active: bool
     is_verified: bool
-    monthly_submission_limit: int
-    monthly_submissions_used: int
     created_at: datetime
+    watermarks_made: int
+    plagiarisms_prevented: int
+    current_tokens: int
+    plan: str
+    function_pref: dict
+    ui_pref: dict
+    tokens_used: int
 
     class Config:
         field_attributes = True
@@ -42,6 +47,17 @@ class OwnerResponse(OwnerBase):
 class OwnerLogin(BaseModel):
     email: EmailStr
     password: str
+    
+    
+class UpdateSettings(BaseModel):
+    id: int
+    function_pref: dict
+    ui_pref: dict
+    
+    
+class UpdatePlan(BaseModel):
+    id: int
+    plan: dict
     
     
 class ForgotPasswordRequest(BaseModel):

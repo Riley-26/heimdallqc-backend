@@ -18,7 +18,7 @@ class ApiKey(Base):
     
     # API key details
     key = Column(String(64), unique=True, index=True, nullable=False)
-    name = Column(String(100), nullable=False)  # "Production", "Development", etc.
+    name = Column(String(100), nullable=False)
     
     # Status
     is_active = Column(Boolean, default=True)

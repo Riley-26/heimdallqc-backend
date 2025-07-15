@@ -20,7 +20,7 @@ from .db.database import get_db
 from .models.owner import Owner, Verified_site
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse
+from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
 from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse
 
@@ -141,7 +141,7 @@ async def authenticate_api_key(api_key: str, db: Session) -> ApiKey:
     return api_key_obj
 
 # Text processing function
-async def process_text(text: str) -> dict:
+async def process_text(text: str, owner_pref: str) -> dict:
     """
     Process the submitted text and determine if it meets requirements.
     
@@ -154,11 +154,7 @@ async def process_text(text: str) -> dict:
     
     # ANALYSIS
     ai_result = ai_analysis(text)
-    plag_result = plag_analysis(text)
-    
-    # CHECK PREFERENCES FOR TEXT EDITS
-    print(ai_result)
-    print(plag_result)
+    plag_result = plag_analysis(text, owner_pref)
     
     return {
         "ai_result": ai_result,
@@ -183,7 +179,7 @@ async def process_submission_background(submission_id: int):
         
         # Process without time pressure
         try:
-            processing_result = await process_text(submission.orig_text)
+            processing_result = await process_text(submission.orig_text, )
             
             # Update submission with results
             submission.processing_result = processing_result
@@ -234,7 +230,7 @@ def ai_analysis(text: str):
     return red_response
 
 # -- PLAGIARISM ANALYSIS
-def plag_analysis(text: str):
+def plag_analysis(text: str, owner_pref: str = "auto_cite"):
     winston_url = "https://api.gowinston.ai/v2/plagiarism"
     key = os.getenv("WINST_KEY")
     
@@ -247,47 +243,74 @@ def plag_analysis(text: str):
         "Content-Type": "application/json"
     }
     
-    response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
-    red_response = {
-        "status": response["status"],
-        "score": response["result"]["score"],
-        "sources": [
-            {
-                "score": round(i["score"]),
-                "can_access": i["canAccess"],
-                "url": i["url"],
-                "citation": i["citation"],
-                "sections": [
-                    {
-                        "startIndex": j["startIndex"],
-                        "endIndex": j["endIndex"],
-                        "sequence": j["sequence"]
-                    }
-                    for j in i["plagiarismFound"]
-                ]
-            }
-            for i in response["sources"][:2] if i["score"] >= 80
-        ],
-        "credits": response["credits_used"]
-    }
+    response = requests.request("POST", winston_url, json=payload, headers=headers).text
+    responseJson = json.loads(response)
+    result = {}
+    if responseJson["status"] == 200 and responseJson["result"]["score"] >= 80:
+        if responseJson["result"]["sourceCounts"] > 0:
+            if owner_pref == "auto_cite":
+                result = auto_cite(text, responseJson["sources"])
+            elif owner_pref == "ai_rewrite":
+                result = ai_rewrite(text)
+            elif owner_pref == "redact":
+                result = redact_text(text, responseJson["sources"])
+    elif responseJson["status"] != 200:
+        raise HTTPException(status_code=400, detail="Error getting data")
     
-    return red_response
+    return {
+        "status": responseJson["status"],
+        "score": responseJson["result"]["score"] if responseJson["result"]["score"] else None,
+        "result": result if result else {}
+    }
 
 # -- AUTO-CITATION
 def auto_cite(text: str, sources: list):
-    new_text = text
-    for i in sources:
-        for j in i["plagiarismFound"]:
-            new_text = new_text[0:j["startIndex"]] + "\"" + new_text[j["startIndex"]:j["endIndex"]] + "\""
-    
+    """
+    Auto-cite multiple sources in the text, avoiding overlapping citations.
+    Args:
+        text: The original text.
+        sources: List of source dicts, each with 'plagiarismFound', 'url', 'title'.
+    Returns:
+        Dict with 'cited_text' and a list of 'citations' used.
+    """
+    # Collect all citation ranges with source info
+    ranges = []
+    for source in sources:
+        for found in source.get("plagiarismFound", []):
+            ranges.append({
+                "start": found["startIndex"],
+                "end": found["endIndex"],
+                "source": {"url": source["url"], "title": source["title"]}
+            })
+
+    # Sort by start index, then by longest match first
+    ranges.sort(key=lambda x: (x["start"], -(x["end"] - x["start"])))
+
+    # Merge overlapping/duplicate ranges, keeping the first source for each range
+    merged = []
+    last_end = -1
+    for r in ranges:
+        if r["start"] >= last_end:
+            merged.append(r)
+            last_end = r["end"]
+        else:
+            # Overlap: skip or adjust as needed (here, we skip)
+            continue
+
+    # Build the new text with citations
+    cited_text = ""
+    last_idx = 0
+    citations = []
+    for r in merged:
+        cited_text += text[last_idx:r["start"]]
+        cited_text += f'"{text[r["start"]:r["end"]]}"'
+        citations.append(r["source"])
+        last_idx = r["end"]
+    cited_text += text[last_idx:]
+
     return {
-        "cited_text": new_text,
-        "sources": [{
-            "url": i["url"],
-            "text": [j["sequence"] for j in i["plagiarismFound"]],
-            "startIndex": [j["startIndex"] for j in i["plagiarismFound"]],
-            "endIndex": [j["endIndex"] for j in i["plagiarismFound"]]
-        } for i in sources]
+        "modif_text": cited_text,
+        "citations": citations
     }
 
 # -- AI REWRITE
@@ -307,16 +330,51 @@ def ai_rewrite(text: str):
         """
     )
 
-    return response
+    return { "modif_text": response.output_text }
 
 # -- REDACTED
-def redact_text(text: str, sections: list):
-    new_text = text
-    for i in sections:
-        if i in new_text:
-            new_text = new_text.replace(i, "[REDACTED]")
+def redact_text(text: str, sources: list):
+    """
+    Redact multiple sources in the text, avoiding overlapping redactions.
+    Args:
+        text: The original text.
+        sources: List of source dicts, each with 'plagiarismFound'.
+    Returns:
+        The redacted text.
+    """
+    # Collect all ranges to redact
+    ranges = []
+    for source in sources:
+        for found in source.get("plagiarismFound", []):
+            ranges.append({
+                "start": found["startIndex"],
+                "end": found["endIndex"]
+            })
 
-    return new_text
+    # Sort by start index, then by longest match first
+    ranges.sort(key=lambda x: (x["start"], -(x["end"] - x["start"])))
+
+    # Merge overlapping/duplicate ranges
+    merged = []
+    last_end = -1
+    for r in ranges:
+        if r["start"] >= last_end:
+            merged.append(r)
+            last_end = r["end"]
+        else:
+            # Overlap: skip or adjust as needed (here, we skip)
+            continue
+
+    # Build the new text with redactions
+    redacted_text = ""
+    last_idx = 0
+    for r in merged:
+        redacted_text += text[last_idx:r["start"]]
+        redacted_text += " [REDACTED] "
+        last_idx = r["end"]
+    redacted_text += text[last_idx:]
+
+    return { "modif_text": redacted_text }
 
 @app.get("/api/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
 async def check_verified_site(
@@ -417,9 +475,14 @@ async def get_owner(
         domain=owner.domain,
         is_active=owner.is_active,
         is_verified=owner.is_verified,
-        monthly_submission_limit=owner.monthly_submission_limit,
-        monthly_submissions_used=owner.monthly_submissions_used,
-        created_at=owner.created_at
+        created_at=owner.created_at,
+        watermarks_made=owner.watermarks_made,
+        plagiarisms_prevented=owner.plagiarisms_prevented,
+        current_tokens=owner.current_tokens,
+        plan=owner.plan,
+        function_pref=owner.function_pref,
+        ui_pref=owner.ui_pref,
+        tokens_used=owner.tokens_used
     )
 
 # -- DELETE OWNER
@@ -427,8 +490,41 @@ async def get_owner(
 # -- GET PLAN USAGE
 
 # -- UPGRADE/CHANGE PLAN
+@app.post("/api/owners/update-plan")
+async def update_plan(
+    request: UpdatePlan,
+    db: Session = Depends(get_db)
+):
+    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    owner.plan = request.change_plan(request.plan)
+    
+    db.commit()
+    
+    return {
+        "status": "Updated preferences successfully"
+    }
 
-# -- SAVE SETTINGS
+@app.post("/api/owners/update-settings")
+async def update_settings(
+    request: UpdateSettings,
+    db: Session = Depends(get_db)
+):
+
+    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    owner.function_pref = request.function_pref
+    owner.ui_pref = request.ui_pref
+    
+    db.commit()
+    
+    return {
+        "status": "Updated preferences successfully"
+    }
 
 @app.post("/api/forgot-password") # PUBLIC
 async def forgot_password(
@@ -496,21 +592,12 @@ async def create_api_key(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    # Check if API key already exists for this owner
-    existing_keys = db.query(ApiKey).filter(
-        ApiKey.owner_id == owner_id
-    ).all()
-    
     # Generate new API key
     api_key = ApiKey(
         owner_id=owner_id,
         name=api_key_data.name,
         key=ApiKey.generate_key()
     )
-    
-    if len(existing_keys) > 0 and api_key:
-        for i in existing_keys:
-            i.is_active = False
     
     db.add(api_key)
     db.commit()
@@ -540,7 +627,7 @@ async def list_api_key(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner_id).first()
+    api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner_id).all()
     
     # Return masked keys for security
     return [
@@ -556,7 +643,7 @@ async def list_api_key(
         for key in api_keys
     ]
 
-@app.delete("/api/api-keys/{api_key_id}") # PRIVATE - LOGIN
+@app.delete("/api/api-keys/{api_key_id}/delete-key") # PRIVATE - LOGIN
 async def deactivate_api_key(
     api_key_id: int,
     db: Session = Depends(get_db)
@@ -703,9 +790,17 @@ async def upload_submission(
     """
     key = db.query(ApiKey).filter(
         ApiKey.owner_id == submission_data.owner_id,
+        ApiKey.id == submission_data.key_id,
         ApiKey.is_active == True
     ).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="No key available")
     
+    owner = db.query(Owner).filter( Owner.id == submission_data.owner_id ).first()
+    for i in owner.function_pref.keys():
+        if owner.function_pref[i] == True:
+            checked_pref = i
+
     # Create submission record
     submission = Submission(
         owner_id=submission_data.owner_id,
@@ -720,7 +815,9 @@ async def upload_submission(
         status=ProcessingStatus.PENDING,
         manual_upload=True,
         action_needed=submission_data.action_needed,
-        edited=submission_data.edited
+        edited=submission_data.edited,
+        function_pref=checked_pref,
+        temp_text=submission_data.temp_text
     )
     
     db.add(submission)
@@ -733,15 +830,18 @@ async def upload_submission(
         db.commit()
         
         # Try processing with 3-second timeout
-        processing_result = await asyncio.wait_for(
-            process_text(submission_data.orig_text),
-            timeout=3.0
-        )
+        processing_result = await process_text(submission_data.orig_text, checked_pref)
+        # processing_result = await asyncio.wait_for(
+        #     timeout=3.0
+        # )
         
         # Processing completed within 3 seconds
         submission.ai_result = processing_result["ai_result"]
         submission.plag_result = processing_result["plag_result"]
         submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
+        
+        if processing_result["plag_result"] != False and processing_result["plag_result"]["result"]["modif_text"]:
+            submission.temp_text = processing_result["plag_result"]["result"]["modif_text"]
         
         if submission.meets_requirements:
             submission.update_status(ProcessingStatus.SUCCESS)
@@ -750,7 +850,7 @@ async def upload_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Your submission has failed to process."
             
-        if processing_result["plag_result"]["result"]["score"] >= 60:
+        if processing_result["plag_result"]["score"] >= 60:
             submission.update_action(True)
         
         db.commit()
@@ -835,7 +935,7 @@ async def list_owner_submissions(
     # Get submissions with pagination
     submissions = query.order_by(Submission.created_at.desc()).offset(skip).limit(limit).all()
     
-    # Return simplified list response
+    # Return list response
     return [
         {
             "id": sub.id,
@@ -855,7 +955,9 @@ async def list_owner_submissions(
             "page_link": sub.page_link,
             "created_at": sub.created_at,
             "edited": sub.edited,
-            "edited_at": sub.edited_at
+            "edited_at": sub.edited_at,
+            "function_pref": sub.function_pref,
+            "temp_text": sub.temp_text
         }
         for sub in submissions
     ]
