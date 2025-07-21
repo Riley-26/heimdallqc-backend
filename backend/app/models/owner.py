@@ -3,44 +3,45 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
 
-class Plans:
-    NONE = {
+plans_dict = {
+    "None": {
         "name": "none",
         "tokens": 0,
-        "price": "£0"
-    }
-    EXTRINSIC = {
+        "price": 0
+    },
+    "Extrinsic": {
         "name": "extrinsic",
         "tokens": 8000,
-        "price": "£54"
-    }
-    INTRINSIC = {
+        "price": 54
+    },
+    "Intrinsic": {
         "name": "intrinsic",
         "tokens": 6000,
-        "price": "£44"
-    }
-    COMBO = {
+        "price": 44
+    },
+    "Combo": {
         "name": "combo",
         "tokens": 16500,
-        "price": "£98"
+        "price": 98
     }
+}
 
 class Tokens:
     sm = {
         "tokens": 1000,
-        "price": "£8"
+        "price": 8
     }
     md = {
         "tokens": 4000,
-        "price": "£30"
+        "price": 30
     }
     lg = {
         "tokens": 10000,
-        "price": "£65"
+        "price": 65
     }
     xl = {
         "tokens": 50000,
-        "price": "£300"
+        "price": 300
     }
     
 
@@ -67,7 +68,7 @@ class Owner(Base):
     # Account status
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
-    plan = Column(String(20), nullable=False, default="none")
+    plan = Column(JSON, nullable=False, default=plans_dict["None"])
     function_pref = Column(JSON, nullable=False, default=lambda: {
         "auto_cite": True,
         "ai_rewrite": False,
@@ -79,7 +80,7 @@ class Owner(Base):
     })
     
     # Usage tracking
-    current_tokens = Column(Integer, default=Plans.NONE["tokens"], nullable=False)
+    current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)
     tokens_used = Column(Integer, default=0, nullable=False)
     watermarks_made = Column(Integer, default=0, nullable=False)
     plagiarisms_prevented = Column(Integer, default=0, nullable=False)
@@ -95,22 +96,19 @@ class Owner(Base):
         return f"<Owner(id={self.id}, email={self.email})>"
     
     def change_plan(self, new_plan):
-        plan_dict = {
-            "none": Plans.NONE,
-            "extrinsic": Plans.EXTRINSIC,
-            "intrinsic": Plans.INTRINSIC,
-            "combo": Plans.COMBO
-        }
-        if new_plan in plan_dict:
+        tokens = self.current_tokens
+
+        if new_plan in plans_dict.keys():
             # Only increase tokens if tokens are short
-            if self.current_tokens < plan_dict[new_plan]["tokens"]:
-                self.current_tokens = plan_dict[new_plan]["tokens"]
+            if self.current_tokens < plans_dict[new_plan]["tokens"]:
+                tokens = plans_dict[new_plan]["tokens"]
             
-            # Calc price diff
-            price_diff = max(0, plan_dict[new_plan]["price"] - plan_dict[self.plan]["price"])
-            self.plan = new_plan
-            
-            return price_diff
+            return {
+                "plan": plans_dict[new_plan],
+                "tokens": tokens
+            }
+        else:
+            return None
         
     def add_tokens(self, pack):
         pack_dict = {
@@ -119,9 +117,12 @@ class Owner(Base):
             "lg": Tokens.lg,
             "xl": Tokens.xl
         }
-        if pack in pack_dict:
-            self.current_tokens += pack_dict[pack]["tokens"]
-            return pack_dict[pack]["price"]
+        if pack in pack_dict.keys():
+            tokens = self.current_tokens + pack_dict[pack]["tokens"]
+            return {
+                "tokens": tokens,
+                "price": pack_dict[pack]["price"]
+            }
         return None
     
     def update_prefs(self, new_prefs):

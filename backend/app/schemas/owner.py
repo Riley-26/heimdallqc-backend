@@ -35,7 +35,7 @@ class OwnerResponse(OwnerBase):
     watermarks_made: int
     plagiarisms_prevented: int
     current_tokens: int
-    plan: str
+    plan: dict
     function_pref: dict
     ui_pref: dict
     tokens_used: int
@@ -57,7 +57,12 @@ class UpdateSettings(BaseModel):
     
 class UpdatePlan(BaseModel):
     id: int
-    plan: dict
+    plan_name: str
+    
+    
+class UpdateTokens(BaseModel):
+    id: int
+    pack_name: str
     
     
 class ForgotPasswordRequest(BaseModel):

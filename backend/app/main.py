@@ -20,7 +20,7 @@ from .db.database import get_db
 from .models.owner import Owner, Verified_site
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings
+from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings, UpdateTokens
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
 from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse
 
@@ -259,7 +259,7 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
     
     return {
         "status": responseJson["status"],
-        "score": responseJson["result"]["score"] if responseJson["result"]["score"] else None,
+        "score": responseJson["result"]["score"] if responseJson["result"]["score"] >= 0 else None,
         "result": result if result else {}
     }
 
@@ -499,12 +499,35 @@ async def update_plan(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    owner.plan = request.change_plan(request.plan)
+    new_plan = owner.change_plan(request.plan_name)
+    owner.plan = new_plan["plan"]
+    owner.current_tokens = new_plan["tokens"]
     
     db.commit()
     
     return {
-        "status": "Updated preferences successfully"
+        "status": "Updated plan successfully"
+    }
+
+@app.post("/api/owners/buy-tokens")
+async def buy_tokens(
+    request: UpdateTokens,
+    db: Session = Depends(get_db)
+):
+    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    added_tokens = owner.add_tokens(request.pack_name)
+    if added_tokens != None:
+        owner.current_tokens = added_tokens["tokens"]
+    else:
+        raise HTTPException(status_code=404, detail="Failed to add tokens")
+    
+    db.commit()
+    
+    return {
+        "status": "Tokens successfully bought"
     }
 
 @app.post("/api/owners/update-settings")
@@ -840,10 +863,10 @@ async def upload_submission(
         submission.plag_result = processing_result["plag_result"]
         submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
         
-        if processing_result["plag_result"] != False and processing_result["plag_result"]["result"]["modif_text"]:
-            submission.temp_text = processing_result["plag_result"]["result"]["modif_text"]
-        
         if submission.meets_requirements:
+            if "modif_text" in processing_result["plag_result"]["result"].keys():
+                submission.temp_text = processing_result["plag_result"]["result"]["modif_text"]
+                
             submission.update_status(ProcessingStatus.SUCCESS)
             message = "Success! Your submission has been processed."
         else:
@@ -996,6 +1019,8 @@ async def get_submission_detail(
         edited=submission.edited,
         ai_result=submission.ai_result,
         plag_result=submission.plag_result,
+        function_pref=submission.function_pref,
+        temp_text=submission.temp_text,
         message="Submission details retrieved successfully"
     )
 
