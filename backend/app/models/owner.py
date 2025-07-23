@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, Table, Foreig
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
+from datetime import datetime, timedelta
 
 plans_dict = {
     "None": {
@@ -68,6 +69,7 @@ class Owner(Base):
     # Account status
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
+    verified_month_end = Column(DateTime(timezone=True), nullable=True)
     plan = Column(JSON, nullable=False, default=plans_dict["None"])
     function_pref = Column(JSON, nullable=False, default=lambda: {
         "auto_cite": True,
@@ -88,6 +90,7 @@ class Owner(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    verified_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     api_keys = relationship("ApiKey", back_populates="owner", cascade="all, delete-orphan")
@@ -133,6 +136,22 @@ class Owner(Base):
         for key, value in new_prefs.items():
             if key in self.preferences:
                 self.preferences[key] = value
+    
+    def verify_owner(self):
+        """Call this when owner is verified."""
+        self.is_verified = True
+        now = datetime.now()
+        self.verified_at = now
+        # Set month end to 30 days from now
+        self.verified_month_end = now + timedelta(days=30)
+        
+    def reset_monthly_tokens(self):
+        """Call this to reset tokens if month has passed."""
+        now = datetime.now()
+        if self.verified_month_end and now >= self.verified_month_end:
+            self.current_tokens = self.plan.get("tokens", 0)
+            # Set next month end
+            self.verified_month_end = self.verified_month_end + timedelta(days=30)
     
     
 class Verified_site(Base):

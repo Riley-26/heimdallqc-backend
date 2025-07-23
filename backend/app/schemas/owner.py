@@ -39,6 +39,8 @@ class OwnerResponse(OwnerBase):
     function_pref: dict
     ui_pref: dict
     tokens_used: int
+    verified_at: Optional[datetime] = None
+    verified_month_end: Optional[datetime] = None
 
     class Config:
         field_attributes = True
@@ -58,6 +60,10 @@ class UpdateSettings(BaseModel):
 class UpdatePlan(BaseModel):
     id: int
     plan_name: str
+    
+    
+class CancelPlan(BaseModel):
+    id: int
     
     
 class UpdateTokens(BaseModel):

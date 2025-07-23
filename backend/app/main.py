@@ -1,3 +1,4 @@
+import math
 import secrets
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,10 +21,11 @@ from .db.database import get_db
 from .models.owner import Owner, Verified_site
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings, UpdateTokens
+from .schemas.owner import CancelPlan, ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings, UpdateTokens
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
 from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse
 
+MARKUP_FACTOR = 15
 
 # Create FastAPI application
 app = FastAPI(
@@ -221,10 +223,11 @@ def ai_analysis(text: str):
     }
     
     response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
+
     red_response = {
         "status": response["status"],
         "score": round(100 - response["score"]),
-        "credits": response["credits_used"]
+        "tokens": response["credits_used"]
     }
     
     return red_response
@@ -246,6 +249,7 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
     response = requests.request("POST", winston_url, json=payload, headers=headers).text
     responseJson = json.loads(response)
     result = {}
+    tokens = 0
     if responseJson["status"] == 200 and responseJson["result"]["score"] >= 80:
         if responseJson["result"]["sourceCounts"] > 0:
             if owner_pref == "auto_cite":
@@ -254,13 +258,18 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
                 result = ai_rewrite(text)
             elif owner_pref == "redact":
                 result = redact_text(text, responseJson["sources"])
+                
+            if "tokens" in result.keys():
+                tokens += result["tokens"]
+                
     elif responseJson["status"] != 200:
         raise HTTPException(status_code=400, detail="Error getting data")
     
     return {
         "status": responseJson["status"],
         "score": responseJson["result"]["score"] if responseJson["result"]["score"] >= 0 else None,
-        "result": result if result else {}
+        "result": result if result else {},
+        "tokens": responseJson["credits_used"] + tokens
     }
 
 # -- AUTO-CITATION
@@ -319,7 +328,7 @@ def ai_rewrite(text: str):
     client = OpenAI(api_key=os.getenv("GPT_KEY"))
 
     response = client.responses.create(
-        model="gpt-4.1",
+        model="gpt-4.1-mini",
         instructions="",
         input=f"""
             Rewrite my original text:
@@ -330,7 +339,12 @@ def ai_rewrite(text: str):
         """
     )
 
-    return { "modif_text": response.output_text }
+    print(response)
+
+    return { 
+        "modif_text": response.output_text,
+        "tokens": 0
+    }
 
 # -- REDACTED
 def redact_text(text: str, sources: list):
@@ -482,10 +496,12 @@ async def get_owner(
         plan=owner.plan,
         function_pref=owner.function_pref,
         ui_pref=owner.ui_pref,
-        tokens_used=owner.tokens_used
+        tokens_used=owner.tokens_used,
+        verified_at=owner.verified_at,
+        verified_month_end=owner.verified_month_end
     )
 
-# -- DELETE OWNER
+# -- DEACTIVATE/DELETE OWNER
 
 # -- GET PLAN USAGE
 
@@ -503,10 +519,34 @@ async def update_plan(
     owner.plan = new_plan["plan"]
     owner.current_tokens = new_plan["tokens"]
     
+    owner.is_verified = True
+    owner.verify_owner()
+    
     db.commit()
     
     return {
         "status": "Updated plan successfully"
+    }
+    
+# -- CANCEL PLAN
+@app.post("/api/owners/cancel-plan")
+async def cancel_plan(
+    request: CancelPlan,
+    db: Session = Depends(get_db)
+):
+    from .models.owner import plans_dict
+    
+    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    owner.plan = plans_dict["None"]
+    owner.is_verified = False
+    
+    db.commit()
+    
+    return {
+        "status": "Cancelled plan successfully"
     }
 
 @app.post("/api/owners/buy-tokens")
@@ -697,7 +737,6 @@ async def create_submission(
 ):
     """
     Create a new submission and process it.
-    If processing takes longer than 3 seconds, continue in background.
     """
     # Authenticate API key
     api_key_obj = await authenticate_api_key(api_key, db)
@@ -729,12 +768,8 @@ async def create_submission(
         db.commit()
         
         # Try processing with 3-second timeout
-        processing_result = await asyncio.wait_for(
-            process_text(submission_data.orig_text),
-            timeout=3.0
-        )
+        processing_result = await process_text(submission_data.orig_text),
         
-        # Processing completed within 3 seconds
         submission.ai_result = processing_result["ai_result"]
         submission.plag_result = processing_result["plag_result"]
         submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
@@ -764,29 +799,7 @@ async def create_submission(
             completed_processing_at=submission.completed_processing_at,
             message=message
         )
-        
-    except asyncio.TimeoutError:
-        # Processing is taking longer than 3 seconds
-        submission.update_status(ProcessingStatus.TIMEOUT)
-        db.commit()
-        
-        # Continue processing in background
-        background_tasks.add_task(process_submission_background, submission.id)
-        
-        return SubmissionResponse(
-            id=submission.id,
-            status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=None,
-            action_needed=submission.action_needed,
-            failure_reason=None,
-            created_at=submission.created_at,
-            completed_processing_at=None,
-            message="Thank you for your submission! We're processing it now and will notify the website owner when complete."
-        )
-        
     except Exception as e:
-        # Error occurred within 3 seconds - user is still there
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
@@ -852,29 +865,38 @@ async def upload_submission(
         submission.update_status(ProcessingStatus.PROCESSING)
         db.commit()
         
-        # Try processing with 3-second timeout
         processing_result = await process_text(submission_data.orig_text, checked_pref)
-        # processing_result = await asyncio.wait_for(
-        #     timeout=3.0
-        # )
+        ai_res = processing_result["ai_result"]
+        plag_res = processing_result["plag_result"]
+        res_tokens = 0
         
-        # Processing completed within 3 seconds
-        submission.ai_result = processing_result["ai_result"]
-        submission.plag_result = processing_result["plag_result"]
-        submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
+        if "tokens" in ai_res.keys():
+            res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
+        if "tokens" in plag_res.keys():
+            res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
+        
+        submission.ai_result = ai_res
+        submission.plag_result = plag_res
+        submission.meets_requirements = ai_res["status"] == 200 and plag_res["status"] == 200
+        
+        submission.tokens_used = submission.tokens_used + res_tokens
+        owner.current_tokens = owner.current_tokens - res_tokens
+        owner.tokens_used = owner.tokens_used + res_tokens
         
         if submission.meets_requirements:
-            if "modif_text" in processing_result["plag_result"]["result"].keys():
-                submission.temp_text = processing_result["plag_result"]["result"]["modif_text"]
+            submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
             message = "Success! Your submission has been processed."
+            
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Your submission has failed to process."
             
-        if processing_result["plag_result"]["score"] >= 60:
+        if plag_res["score"] >= 60:
             submission.update_action(True)
+            
+        # DELETE IF NOT FLAGGED
         
         db.commit()
         db.refresh(submission)
@@ -890,33 +912,10 @@ async def upload_submission(
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
             message=message,
-            manual_upload=True
+            manual_upload=True,
+            tokens_used=submission.tokens_used
         )
-        
-    except asyncio.TimeoutError:
-        # Processing is taking longer than 3 seconds
-        submission.update_status(ProcessingStatus.TIMEOUT)
-        db.commit()
-        
-        # Continue processing in background
-        background_tasks.add_task(process_submission_background, submission.id)
-        
-        return SubmissionResponse(
-            owner_id=submission_data.owner_id,
-            id=submission.id,
-            status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=None,
-            action_needed=submission.action_needed,
-            failure_reason=None,
-            created_at=submission.created_at,
-            completed_processing_at=None,
-            message="Thank you for your submission! We're processing it now and will notify the website owner when complete.",
-            manual_upload=True
-        )
-        
     except Exception as e:
-        # Error occurred within 3 seconds - user is still there
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
@@ -931,7 +930,8 @@ async def upload_submission(
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
             message="Sorry, there was an error processing your submission. Please try again.",
-            manual_upload=True
+            manual_upload=True,
+            tokens_used=submission.tokens_used
         )
 
 @app.get("/api/owners/{owner_id}/submissions") # PRIVATE - LOGIN

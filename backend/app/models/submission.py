@@ -40,6 +40,7 @@ class Submission(Base):
     action_needed = Column(Boolean, nullable=False)
     edited = Column(Boolean, nullable=False)
     function_pref = Column(String(20), default="Auto-cite", nullable=True)
+    tokens_used = Column(Integer, nullable=False, default=0)
     
     ai_result = Column(JSON, nullable=True)
     plag_result = Column(JSON, nullable=True)

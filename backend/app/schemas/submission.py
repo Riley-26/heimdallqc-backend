@@ -16,6 +16,7 @@ class SubmissionBase(BaseModel):
     edited: bool = False
     edited_at: Optional[datetime] = None
     function_pref: Optional[str] = None
+    tokens_used: int = 0
 
 class SubmissionCreate(SubmissionBase):
     owner_id: Optional[int] = None
@@ -48,6 +49,7 @@ class SubmissionResponse(BaseModel):
     completed_processing_at: Optional[datetime] = None
     message: Optional[str] = None
     manual_upload: bool
+    tokens_used: int
 
     class Config:
         field_attributes = True
