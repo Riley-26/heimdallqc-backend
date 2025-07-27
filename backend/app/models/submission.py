@@ -41,7 +41,6 @@ class Submission(Base):
     edited = Column(Boolean, nullable=False)
     function_pref = Column(String(20), default="Auto-cite", nullable=True)
     tokens_used = Column(Integer, nullable=False, default=0)
-    
     ai_result = Column(JSON, nullable=True)
     plag_result = Column(JSON, nullable=True)
     temp_text = Column(Text, nullable=True)

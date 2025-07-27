@@ -5,10 +5,9 @@ from enum import Enum
 import enum
 
 class SubmissionBase(BaseModel):
+    owner_id: Optional[int] = None
     orig_text: str = Field(..., min_length=1, max_length=10000)
     edit_text: Optional[str] = Field(None, max_length=10000)
-    domain: Optional[str] = Field(None, max_length=1000)
-    page_link: Optional[str] = Field(None, max_length=1000)
     custom_id: Optional[int] = None
     question_result: Optional[bool] = None
     manual_upload: bool = False
@@ -17,19 +16,20 @@ class SubmissionBase(BaseModel):
     edited_at: Optional[datetime] = None
     function_pref: Optional[str] = None
     tokens_used: int = 0
+    temp_text: Optional[str] = None
 
-class SubmissionCreate(SubmissionBase):
-    owner_id: Optional[int] = None
+
+class SubmissionUpload(SubmissionBase):
+    orig_text: str
     key_id: str
-    temp_text: Optional[str] = Field(None, max_length=10000)
     
-    @field_validator('orig_text', 'edit_text')
-    def validate_text(cls, v):
-        # Remove excessive whitespace
-        cleaned = ' '.join(v.split())
-        if len(cleaned) < 5:
-            raise ValueError('Text must be at least 5 characters long after cleaning')
-        return cleaned
+    
+class SubmissionCreate(SubmissionBase):
+    orig_text: str
+    question_result: bool
+    domain: Optional[str] = Field(None, max_length=1000)
+    page_link: Optional[str] = Field(None, max_length=1000)
+    
     
 class SubmissionEdit(BaseModel):
     owner_id: Optional[int] = None

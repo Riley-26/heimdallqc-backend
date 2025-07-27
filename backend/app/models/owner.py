@@ -13,36 +13,36 @@ plans_dict = {
     "Extrinsic": {
         "name": "extrinsic",
         "tokens": 8000,
-        "price": 54
+        "price": 34
     },
     "Intrinsic": {
         "name": "intrinsic",
         "tokens": 6000,
-        "price": 44
+        "price": 27
     },
     "Combo": {
         "name": "combo",
         "tokens": 16500,
-        "price": 98
+        "price": 59
     }
 }
 
 class Tokens:
     sm = {
         "tokens": 1000,
-        "price": 8
+        "price": 5
     }
     md = {
         "tokens": 4000,
-        "price": 30
+        "price": 18
     }
     lg = {
         "tokens": 10000,
-        "price": 65
+        "price": 40
     }
     xl = {
         "tokens": 50000,
-        "price": 300
+        "price": 175
     }
     
 
@@ -71,6 +71,8 @@ class Owner(Base):
     is_verified = Column(Boolean, default=False)
     verified_month_end = Column(DateTime(timezone=True), nullable=True)
     plan = Column(JSON, nullable=False, default=plans_dict["None"])
+    
+    # Settings
     function_pref = Column(JSON, nullable=False, default=lambda: {
         "auto_cite": True,
         "ai_rewrite": False,
@@ -80,6 +82,7 @@ class Owner(Base):
         "widget": True,
         "watermarks": True
     })
+    ai_threshold_option = Column(Integer, nullable=False, default=0)
     
     # Usage tracking
     current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)

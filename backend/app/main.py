@@ -23,7 +23,7 @@ from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
 from .schemas.owner import CancelPlan, ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings, UpdateTokens
 from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
-from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse
+from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse, SubmissionUpload
 
 MARKUP_FACTOR = 15
 
@@ -38,7 +38,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -224,13 +224,18 @@ def ai_analysis(text: str):
     
     response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
 
-    red_response = {
+    if "status" not in response.keys():
+        return {
+            "status": 400,
+            "score": "N/A",
+            "tokens": 0
+        }
+
+    return {
         "status": response["status"],
         "score": round(100 - response["score"]),
         "tokens": response["credits_used"]
     }
-    
-    return red_response
 
 # -- PLAGIARISM ANALYSIS
 def plag_analysis(text: str, owner_pref: str = "auto_cite"):
@@ -246,30 +251,35 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
         "Content-Type": "application/json"
     }
     
-    response = requests.request("POST", winston_url, json=payload, headers=headers).text
-    responseJson = json.loads(response)
+    response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
     result = {}
     tokens = 0
-    if responseJson["status"] == 200 and responseJson["result"]["score"] >= 80:
-        if responseJson["result"]["sourceCounts"] > 0:
+
+    if "status" not in response.keys():
+        return {
+            "status": 400,
+            "score": "N/A",
+            "result": {},
+            "tokens": 0
+        }
+        
+    if response["status"] == 200 and response["result"]["score"] >= 80:
+        if response["result"]["sourceCounts"] > 0:
             if owner_pref == "auto_cite":
-                result = auto_cite(text, responseJson["sources"])
+                result = auto_cite(text, response["sources"])
             elif owner_pref == "ai_rewrite":
                 result = ai_rewrite(text)
             elif owner_pref == "redact":
-                result = redact_text(text, responseJson["sources"])
+                result = redact_text(text, response["sources"])
                 
             if "tokens" in result.keys():
                 tokens += result["tokens"]
-                
-    elif responseJson["status"] != 200:
-        raise HTTPException(status_code=400, detail="Error getting data")
     
     return {
-        "status": responseJson["status"],
-        "score": responseJson["result"]["score"] if responseJson["result"]["score"] >= 0 else None,
+        "status": response["status"],
+        "score": response["result"]["score"],
         "result": result if result else {},
-        "tokens": responseJson["credits_used"] + tokens
+        "tokens": response["credits_used"]
     }
 
 # -- AUTO-CITATION
@@ -390,7 +400,7 @@ def redact_text(text: str, sources: list):
 
     return { "modif_text": redacted_text }
 
-@app.get("/api/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
+@app.get("/api/v1/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
 async def check_verified_site(
     site_link: str,
     db: Session = Depends(get_db)
@@ -420,7 +430,7 @@ async def check_verified_site(
 # PRIVATE - KEY: NEEDS VALID API KEY TO ACCESS
 # PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
 
-@app.post("/api/owners") # PUBLIC
+@app.post("/api/v1/owners") # PUBLIC
 async def create_owner(
     owner_data: OwnerCreate,
     db: Session = Depends(get_db)
@@ -469,7 +479,7 @@ async def create_verif_site(domain, db):
     
     return verif_site
 
-@app.get("/api/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -496,6 +506,7 @@ async def get_owner(
         plan=owner.plan,
         function_pref=owner.function_pref,
         ui_pref=owner.ui_pref,
+        ai_threshold_option=owner.ai_threshold_option,
         tokens_used=owner.tokens_used,
         verified_at=owner.verified_at,
         verified_month_end=owner.verified_month_end
@@ -506,7 +517,7 @@ async def get_owner(
 # -- GET PLAN USAGE
 
 # -- UPGRADE/CHANGE PLAN
-@app.post("/api/owners/update-plan")
+@app.post("/api/v1/owners/update-plan")
 async def update_plan(
     request: UpdatePlan,
     db: Session = Depends(get_db)
@@ -529,7 +540,7 @@ async def update_plan(
     }
     
 # -- CANCEL PLAN
-@app.post("/api/owners/cancel-plan")
+@app.post("/api/v1/owners/cancel-plan")
 async def cancel_plan(
     request: CancelPlan,
     db: Session = Depends(get_db)
@@ -549,7 +560,7 @@ async def cancel_plan(
         "status": "Cancelled plan successfully"
     }
 
-@app.post("/api/owners/buy-tokens")
+@app.post("/api/v1/owners/buy-tokens")
 async def buy_tokens(
     request: UpdateTokens,
     db: Session = Depends(get_db)
@@ -570,7 +581,7 @@ async def buy_tokens(
         "status": "Tokens successfully bought"
     }
 
-@app.post("/api/owners/update-settings")
+@app.post("/api/v1/owners/update-settings")
 async def update_settings(
     request: UpdateSettings,
     db: Session = Depends(get_db)
@@ -582,6 +593,7 @@ async def update_settings(
     
     owner.function_pref = request.function_pref
     owner.ui_pref = request.ui_pref
+    owner.ai_threshold_option = request.ai_threshold_option
     
     db.commit()
     
@@ -589,7 +601,7 @@ async def update_settings(
         "status": "Updated preferences successfully"
     }
 
-@app.post("/api/forgot-password") # PUBLIC
+@app.post("/api/v1/forgot-password") # PUBLIC
 async def forgot_password(
     request: ForgotPasswordRequest,
     db: Session = Depends(get_db)
@@ -613,7 +625,7 @@ async def forgot_password(
     
     return {"message": "If an account with that email exists, a reset link has been sent."}
 
-@app.post("/api/reset-password") # PRIVATE - TOKEN
+@app.post("/api/v1/reset-password") # PRIVATE - TOKEN
 async def reset_password(
     request: ResetPasswordRequest,
     db: Session = Depends(get_db)
@@ -641,7 +653,7 @@ async def reset_password(
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/owners/{owner_id}/api-keys", response_model=ApiKeyResponse) # PRIVATE - LOGIN
+@app.post("/api/v1/owners/{owner_id}/api-keys", response_model=ApiKeyResponse) # PRIVATE - LOGIN
 async def create_api_key(
     owner_id: int, 
     api_key_data: ApiKeyCreate, 
@@ -677,7 +689,7 @@ async def create_api_key(
         created_at=api_key.created_at
     )
 
-@app.get("/api/owners/{owner_id}/api-key") # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}/api-key") # PRIVATE - LOGIN
 async def list_api_key(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -706,7 +718,7 @@ async def list_api_key(
         for key in api_keys
     ]
 
-@app.delete("/api/api-keys/{api_key_id}/delete-key") # PRIVATE - LOGIN
+@app.delete("/api/v1/api-keys/{api_key_id}/delete-key") # PRIVATE - LOGIN
 async def deactivate_api_key(
     api_key_id: int,
     db: Session = Depends(get_db)
@@ -727,11 +739,10 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/submissions", response_model=SubmissionResponse) # PRIVATE - KEY
+@app.post("/api/v1/submissions", response_model=SubmissionResponse) # PRIVATE - KEY
 async def create_submission(
     submission_data: SubmissionCreate,
     request: Request,
-    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key_from_header),
     db: Session = Depends(get_db)
 ):
@@ -740,6 +751,11 @@ async def create_submission(
     """
     # Authenticate API key
     api_key_obj = await authenticate_api_key(api_key, db)
+    
+    owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
+    for i in owner.function_pref.keys():
+        if owner.function_pref[i] == True:
+            checked_pref = i
     
     # Create submission record
     submission = Submission(
@@ -750,12 +766,15 @@ async def create_submission(
         edit_text=submission_data.edit_text,
         edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
         custom_id=submission_data.custom_id,
-        questionResult=submission_data.question_result,
+        question_result=submission_data.question_result,
         domain=submission_data.domain,
+        page_link=submission_data.page_link,
         status=ProcessingStatus.PENDING,
         manual_upload=False,
         action_needed=submission_data.action_needed,
-        edited=submission_data.edited
+        edited=submission_data.edited,
+        function_pref=checked_pref,
+        temp_text=submission_data.temp_text
     )
     
     db.add(submission)
@@ -767,28 +786,61 @@ async def create_submission(
         submission.update_status(ProcessingStatus.PROCESSING)
         db.commit()
         
-        # Try processing with 3-second timeout
-        processing_result = await process_text(submission_data.orig_text),
+        processing_result = await process_text(submission_data.orig_text, checked_pref)
+        ai_res = processing_result["ai_result"]
+        plag_res = processing_result["plag_result"]
+        res_tokens = 0
         
-        submission.ai_result = processing_result["ai_result"]
-        submission.plag_result = processing_result["plag_result"]
-        submission.meets_requirements = processing_result["ai_result"]["status"] == 200 and processing_result["plag_result"]["status"] == 200
+        if "tokens" in ai_res.keys():
+            res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
+        if "tokens" in plag_res.keys():
+            res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
+        
+        submission.ai_result = ai_res
+        submission.plag_result = plag_res
+        submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
+        
+        submission.tokens_used = submission.tokens_used + res_tokens
+        owner.current_tokens = owner.current_tokens - res_tokens
+        owner.tokens_used = owner.tokens_used + res_tokens
         
         if submission.meets_requirements:
+            if "modif_text" in plag_res["result"].keys():
+                submission.temp_text = plag_res["result"]["modif_text"]
+                
             submission.update_status(ProcessingStatus.SUCCESS)
             message = "Success! Your submission has been processed."
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Your submission has failed to process."
             
-        # Update when action is needed
-        if processing_result["plag_result"]["result"]["score"] >= 60:
+        if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
+        else:    
+            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
+                submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
+                db.commit()
+                db.refresh(submission)
+                return SubmissionResponse(
+                    owner_id=submission.owner_id,
+                    id=submission.id,
+                    status=submission.status,
+                    orig_text_length=submission.orig_text_length,
+                    meets_requirements=False,
+                    action_needed=submission.action_needed,
+                    failure_reason=submission.failure_reason,
+                    created_at=submission.created_at,
+                    completed_processing_at=submission.completed_processing_at,
+                    message="AI score below threshold",
+                    manual_upload=submission.manual_upload,
+                    tokens_used=submission.tokens_used
+                )
         
         db.commit()
         db.refresh(submission)
         
         return SubmissionResponse(
+            owner_id=submission.owner_id,
             id=submission.id,
             status=submission.status,
             orig_text_length=submission.orig_text_length,
@@ -797,28 +849,33 @@ async def create_submission(
             failure_reason=submission.failure_reason,
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
-            message=message
+            message=message,
+            manual_upload=submission.manual_upload,
+            tokens_used=submission.tokens_used
         )
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
         return SubmissionResponse(
+            owner_id=submission.owner_id,
             id=submission.id,
             status=submission.status,
             orig_text_length=submission.orig_text_length,
             meets_requirements=False,
+            action_needed=submission.action_needed,
             failure_reason=submission.failure_reason,
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
-            message="Sorry, there was an error processing your submission. Please try again."
+            message="Sorry, there was an error processing your submission. Please try again.",
+            manual_upload=submission.manual_upload,
+            tokens_used=submission.tokens_used
         )
 
-@app.post("/api/upload-submission", response_model=SubmissionResponse) # PRIVATE - LOGIN
+@app.post("/api/v1/upload-submission", response_model=SubmissionResponse) # PRIVATE - LOGIN
 async def upload_submission(
-    submission_data: SubmissionCreate,
+    submission_data: SubmissionUpload,
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
@@ -893,10 +950,26 @@ async def upload_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Your submission has failed to process."
             
-        if plag_res["score"] >= 60:
+        if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
-            
-        # DELETE IF NOT FLAGGED
+        else:    
+            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
+                submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
+                db.commit()
+                return SubmissionResponse(
+                    owner_id=submission.owner_id,
+                    id=submission.id,
+                    status=submission.status,
+                    orig_text_length=submission.orig_text_length,
+                    meets_requirements=False,
+                    action_needed=submission.action_needed,
+                    failure_reason=submission.failure_reason,
+                    created_at=submission.created_at,
+                    completed_processing_at=submission.completed_processing_at,
+                    message="AI score below threshold",
+                    manual_upload=submission.manual_upload,
+                    tokens_used=submission.tokens_used
+                )
         
         db.commit()
         db.refresh(submission)
@@ -912,7 +985,7 @@ async def upload_submission(
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
             message=message,
-            manual_upload=True,
+            manual_upload=submission.manual_upload,
             tokens_used=submission.tokens_used
         )
     except Exception as e:
@@ -930,11 +1003,11 @@ async def upload_submission(
             created_at=submission.created_at,
             completed_processing_at=submission.completed_processing_at,
             message="Sorry, there was an error processing your submission. Please try again.",
-            manual_upload=True,
+            manual_upload=submission.manual_upload,
             tokens_used=submission.tokens_used
         )
 
-@app.get("/api/owners/{owner_id}/submissions") # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}/submissions") # PRIVATE - LOGIN
 async def list_owner_submissions(
     owner_id: int,
     skip: int = 0,
@@ -985,7 +1058,7 @@ async def list_owner_submissions(
         for sub in submissions
     ]
 
-@app.get("/api/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
 async def get_submission_detail(
     owner_id: int,
     submission_id: int, 
@@ -1024,7 +1097,7 @@ async def get_submission_detail(
         message="Submission details retrieved successfully"
     )
 
-@app.get("/api/owners/{owner_id}/submissions/stats") # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}/submissions/stats") # PRIVATE - LOGIN
 async def get_submission_stats(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -1059,7 +1132,7 @@ async def get_submission_stats(
         "success_rate": round((successful / total * 100) if total > 0 else 0, 2)
     }
     
-@app.get("/api/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
 async def get_submission_status(
     submission_id: int, 
     api_key: str,
@@ -1099,7 +1172,7 @@ async def get_submission_status(
         message=message_map.get(submission.status, "Status unknown")
     )
     
-@app.delete("/api/owners/{owner_id}/submissions/{submission_id}/delete-submission")
+@app.delete("/api/v1/owners/{owner_id}/submissions/{submission_id}/delete-submission")
 async def delete_submission(
     submission_id: int,
     owner_id: int,
@@ -1120,7 +1193,7 @@ async def delete_submission(
         "message": "Successfully deleted submission"
     }
 
-@app.post("/api/owners/{owner_id}/submissions/{submission_id}/edit-submission")
+@app.post("/api/v1/owners/{owner_id}/submissions/{submission_id}/edit-submission")
 async def edit_submission(
     submission_data: SubmissionEdit,
     db: Session = Depends(get_db)
@@ -1145,6 +1218,14 @@ async def edit_submission(
     }
 
 # -- CREATE WATERMARK
+@app.post("/api/v1/watermarks")
+async def create_watermark(
+    submission_data: SubmissionCreate,
+    request: Request,
+    api_key: str = Depends(get_api_key_from_header),
+    db: Session = Depends(get_db)
+):
+    pass
 
 # -- GET WATERMARKS
 
@@ -1154,7 +1235,7 @@ async def edit_submission(
 # ---------- LOG IN ENDPOINTS ----------
 
 # LOG IN
-@app.post("/api/auth/login")
+@app.post("/api/v1/auth/login")
 async def login(
     login_data: OwnerLogin,
     db: Session = Depends(get_db)

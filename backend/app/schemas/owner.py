@@ -38,6 +38,7 @@ class OwnerResponse(OwnerBase):
     plan: dict
     function_pref: dict
     ui_pref: dict
+    ai_threshold_option: int
     tokens_used: int
     verified_at: Optional[datetime] = None
     verified_month_end: Optional[datetime] = None
@@ -55,6 +56,7 @@ class UpdateSettings(BaseModel):
     id: int
     function_pref: dict
     ui_pref: dict
+    ai_threshold_option: int
     
     
 class UpdatePlan(BaseModel):
