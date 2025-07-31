@@ -22,6 +22,7 @@ class SubmissionBase(BaseModel):
 class SubmissionUpload(SubmissionBase):
     orig_text: str
     key_id: str
+    domain: Optional[str] = Field(None, max_length=1000)
     
     
 class SubmissionCreate(SubmissionBase):

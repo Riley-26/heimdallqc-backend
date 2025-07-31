@@ -904,7 +904,7 @@ async def upload_submission(
         edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
         custom_id=submission_data.custom_id,
         question_result=submission_data.question_result,
-        domain=submission_data.domain,
+        domain=owner.domain,
         status=ProcessingStatus.PENDING,
         manual_upload=True,
         action_needed=submission_data.action_needed,
@@ -1093,6 +1093,7 @@ async def get_submission_detail(
         ai_result=submission.ai_result,
         plag_result=submission.plag_result,
         function_pref=submission.function_pref,
+        tokens_used=submission.tokens_used,
         temp_text=submission.temp_text,
         message="Submission details retrieved successfully"
     )
