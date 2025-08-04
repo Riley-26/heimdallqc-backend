@@ -6,7 +6,6 @@ from sqlalchemy.orm import relationship
 from ..db.database import Base
 import string
 
-
 class ApiKey(Base):
     __tablename__ = "api_keys"
 

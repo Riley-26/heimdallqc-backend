@@ -1,5 +1,6 @@
 import math
 import secrets
+from typing import List
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -18,12 +19,14 @@ import os
 import json
 
 from .db.database import get_db
-from .models.owner import Owner, Verified_site
+from .models.owner import Owner
+from .models.verified_site import VerifiedSite
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import CancelPlan, ForgotPasswordRequest, OwnerCreate, OwnerLogin, OwnerResponse, ResetPasswordRequest, SiteResponse, UpdatePlan, UpdateSettings, UpdateTokens
-from .schemas.api_key import ApiKeyCreate, ApiKeyResponse
-from .schemas.submission import SubmissionCreate, SubmissionEdit, SubmissionResponse, SubmissionDetailResponse, SubmissionUpload
+from .schemas.owner import LoginRequest, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
+from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
+from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
+from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 
 MARKUP_FACTOR = 15
 
@@ -399,27 +402,6 @@ def redact_text(text: str, sources: list):
     redacted_text += text[last_idx:]
 
     return { "modif_text": redacted_text }
-
-@app.get("/api/v1/verif-sites/{site_link}", response_model=SiteResponse) # PUBLIC
-async def check_verified_site(
-    site_link: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Check if site is verified
-    """
-    verif_site = db.query(Verified_site).filter(Verified_site.domain == site_link).first()
-    if not verif_site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    
-    return SiteResponse(
-        domain=verif_site.domain,
-        id=verif_site.id,
-        is_active=verif_site.is_active,
-        total_requests=verif_site.total_requests,
-        last_used_at=verif_site.last_used_at,
-        created_at=verif_site.created_at
-    )
     
 # -- ANALYTICS
 
@@ -438,46 +420,29 @@ async def create_owner(
     """
     Create a new owner account.
     """
-    # Check if owner already exists
     existing_owner = db.query(Owner).filter(Owner.email == owner_data.email).first()
     if existing_owner:
         raise HTTPException(status_code=400, detail="Email already registered")
     
     verified_site = await create_verif_site(owner_data.domain, db)
+    if not verified_site:
+        raise HTTPException(status_code=404, detail="Cannot verify site")
     
-    if verified_site:
-        # Create new owner
-        owner = Owner(
-            domain_id=verified_site.id,
-            email=owner_data.email,
-            name=owner_data.name,
-            domain=owner_data.domain,
-            company=owner_data.company,
-            password_hash=hash_password(owner_data.password)
-        )
-        
-        db.add(owner)
-        db.commit()
-        db.refresh(owner)
-    
-    return {
-        "owner_data": owner_data,
-        "domain": owner_data.domain
-    }
-
-async def create_verif_site(domain, db):
-    """
-    Create a verified site
-    """
-    verif_site = Verified_site(
-        domain=domain
+    # Create new owner
+    owner = Owner(
+        email=owner_data.email,
+        domain=owner_data.domain,
+        password_hash=hash_password(owner_data.password),
+        name=owner_data.name,
+        company=owner_data.company,
+        domain_id=verified_site.id
     )
     
-    db.add(verif_site)
+    db.add(owner)
     db.commit()
-    db.refresh(verif_site)
+    db.refresh(owner)
     
-    return verif_site
+    return
 
 @app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
@@ -487,7 +452,6 @@ async def get_owner(
     """
     Get owner by ID.
     """
-    
     owner = db.query(Owner).filter(Owner.id == owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
@@ -497,17 +461,44 @@ async def get_owner(
         email=owner.email,
         name=owner.name,
         domain=owner.domain,
+        company=owner.company,
         is_active=owner.is_active,
         is_verified=owner.is_verified,
-        created_at=owner.created_at,
+        current_tokens=owner.current_tokens,
+        tokens_used=owner.tokens_used,
+        watermarks_made=owner.watermarks_made,
+        plagiarisms_prevented=owner.plagiarisms_prevented
+    )
+    
+@app.post("/api/v1/owners/{owner_id}/detailed", response_model=OwnerDetailResponse)
+async def get_owner_details(
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get owner by ID.
+    """
+    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    return OwnerDetailResponse(
+        id=owner.id,
+        email=owner.email,
+        name=owner.name,
+        domain=owner.domain,
+        company=owner.company,
+        is_active=owner.is_active,
+        is_verified=owner.is_verified,
+        current_tokens=owner.current_tokens,
+        tokens_used=owner.tokens_used,
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
-        current_tokens=owner.current_tokens,
+        created_at=owner.created_at,
         plan=owner.plan,
         function_pref=owner.function_pref,
         ui_pref=owner.ui_pref,
         ai_threshold_option=owner.ai_threshold_option,
-        tokens_used=owner.tokens_used,
         verified_at=owner.verified_at,
         verified_month_end=owner.verified_month_end
     )
@@ -516,10 +507,9 @@ async def get_owner(
 
 # -- GET PLAN USAGE
 
-# -- UPGRADE/CHANGE PLAN
 @app.post("/api/v1/owners/update-plan")
 async def update_plan(
-    request: UpdatePlan,
+    request: PlanUpdate,
     db: Session = Depends(get_db)
 ):
     owner = db.query(Owner).filter(Owner.id == request.id).first()
@@ -527,27 +517,28 @@ async def update_plan(
         raise HTTPException(status_code=404, detail="Owner not found")
     
     new_plan = owner.change_plan(request.plan_name)
-    owner.plan = new_plan["plan"]
-    owner.current_tokens = new_plan["tokens"]
+    if new_plan:
+        
+        # ----- PAYMENT -----
+        
+        owner.plan = new_plan["plan"]
+        owner.current_tokens = new_plan["tokens"]
+        
+        owner.is_verified = True
+        owner.verify_owner()
+        
+        db.commit()
     
-    owner.is_verified = True
-    owner.verify_owner()
+    return
     
-    db.commit()
-    
-    return {
-        "status": "Updated plan successfully"
-    }
-    
-# -- CANCEL PLAN
-@app.post("/api/v1/owners/cancel-plan")
+@app.patch("/api/v1/owners/cancel-plan")
 async def cancel_plan(
-    request: CancelPlan,
+    request: PlanCancel,
     db: Session = Depends(get_db)
 ):
     from .models.owner import plans_dict
     
-    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
@@ -556,21 +547,22 @@ async def cancel_plan(
     
     db.commit()
     
-    return {
-        "status": "Cancelled plan successfully"
-    }
+    return
 
-@app.post("/api/v1/owners/buy-tokens")
+@app.patch("/api/v1/owners/buy-tokens")
 async def buy_tokens(
-    request: UpdateTokens,
+    request: TokenPurchase,
     db: Session = Depends(get_db)
 ):
-    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
     added_tokens = owner.add_tokens(request.pack_name)
     if added_tokens != None:
+        
+        # ----- PAYMENT -----
+        
         owner.current_tokens = added_tokens["tokens"]
     else:
         raise HTTPException(status_code=404, detail="Failed to add tokens")
@@ -581,9 +573,9 @@ async def buy_tokens(
         "status": "Tokens successfully bought"
     }
 
-@app.post("/api/v1/owners/update-settings")
+@app.patch("/api/v1/owners/update-settings")
 async def update_settings(
-    request: UpdateSettings,
+    request: SettingsUpdate,
     db: Session = Depends(get_db)
 ):
 
@@ -601,18 +593,21 @@ async def update_settings(
         "status": "Updated preferences successfully"
     }
 
-@app.post("/api/v1/forgot-password") # PUBLIC
+@app.patch("/api/v1/forgot-password") # PUBLIC
 async def forgot_password(
-    request: ForgotPasswordRequest,
+    request: PasswordReset,
     db: Session = Depends(get_db)
 ):
     """
     Initiate password reset process by sending reset token to owner's email
     """
+    message = "If an account with that email exists, a reset link has been sent."
+    
     owner = db.query(Owner).filter(Owner.email == request.email).first()
-
     if not owner:
-        return {"message": "If an account with that email exists, a reset link has been sent."}
+        return {
+            "message": message
+        }
     
     reset_token = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=1)
@@ -623,20 +618,22 @@ async def forgot_password(
     
     print(send_reset_email(request.email, reset_token))
     
-    return {"message": "If an account with that email exists, a reset link has been sent."}
+    return {
+        "message": message
+    }
 
-@app.post("/api/v1/reset-password") # PRIVATE - TOKEN
+@app.patch("/api/v1/reset-password") # PRIVATE - TOKEN
 async def reset_password(
-    request: ResetPasswordRequest,
+    request: PasswordUpdate,
     db: Session = Depends(get_db)
 ):
     """
     Reset password using the provided token
     """
     owner = db.query(Owner).filter(Owner.email == request.email).first()
-    reset_token = owner.reset_token == request.token
+    valid_reset_token = owner.reset_token == request.token
     
-    if not reset_token or datetime.now(timezone.utc) > owner.token_expiration:
+    if not valid_reset_token or datetime.now(timezone.utc) > owner.token_expiration:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     
     new_pword_hash = hash_password(request.new_password)
@@ -646,16 +643,50 @@ async def reset_password(
     owner.token_expiration = None
     db.commit()
     
-    return {
-        "detail": "Successfully reset password"
-    }
+    return
 
+
+# ---------- SITE ENDPOINTS ----------
+
+@app.get("/api/v1/verif-sites/{site_link}", response_model=SiteSimpleResponse) # PUBLIC
+async def check_verified_site(
+    site_link: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Check if site is verified
+    """
+    verif_site = db.query(VerifiedSite).filter(VerifiedSite.domain == site_link).first()
+    if not verif_site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    
+    return SiteSimpleResponse(
+        domain=verif_site.domain,
+        id=verif_site.id,
+        is_active=verif_site.is_active
+    )
+
+async def create_verif_site(domain, db):
+    """
+    Create a verified site
+    """
+    
+    # ----- CHECK SITE VALIDITY -----
+    
+    verif_site = VerifiedSite(
+        domain=domain
+    )
+    
+    db.add(verif_site)
+    db.commit()
+    db.refresh(verif_site)
+    
+    return verif_site
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/v1/owners/{owner_id}/api-keys", response_model=ApiKeyResponse) # PRIVATE - LOGIN
+@app.post("/api/v1/owners/api-keys", response_model=ApiKeyReveal) # PRIVATE - LOGIN
 async def create_api_key(
-    owner_id: int, 
     api_key_data: ApiKeyCreate, 
     db: Session = Depends(get_db)
 ):
@@ -663,13 +694,13 @@ async def create_api_key(
     Generate a new API key for an owner.
     """
     # Check if owner exists
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    owner = db.query(Owner).filter(Owner.id == api_key_data.owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
     # Generate new API key
     api_key = ApiKey(
-        owner_id=owner_id,
+        owner_id=api_key_data.owner_id,
         name=api_key_data.name,
         key=ApiKey.generate_key()
     )
@@ -678,19 +709,16 @@ async def create_api_key(
     db.commit()
     db.refresh(api_key)
     
-    return ApiKeyResponse(
+    return ApiKeyReveal(
         id=api_key.id,
         owner_id=api_key.owner_id,
         name=api_key.name,
-        key=api_key.key,  # Full key returned only on creation
-        is_active=api_key.is_active,
-        total_requests=api_key.total_requests,
-        last_used_at=api_key.last_used_at,
-        created_at=api_key.created_at
+        is_active=True,
+        key=api_key.key
     )
 
-@app.get("/api/v1/owners/{owner_id}/api-key") # PRIVATE - LOGIN
-async def list_api_key(
+@app.get("/api/v1/owners/{owner_id}/api-keys", response_model=List[ApiKeyListResponse]) # PRIVATE - LOGIN
+async def get_api_keys(
     owner_id: int,
     db: Session = Depends(get_db)
 ):
@@ -702,31 +730,36 @@ async def list_api_key(
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner_id).all()
+    api_keys = db.query(ApiKey).filter(
+        ApiKey.owner_id == owner_id,
+        ApiKey.is_active == True
+    ).all()
     
     # Return masked keys for security
     return [
-        {
-            "id": key.id,
-            "name": key.name,
-            "masked_key": key.masked_key,
-            "is_active": key.is_active,
-            "total_requests": key.total_requests,
-            "last_used_at": key.last_used_at,
-            "created_at": key.created_at
-        }
-        for key in api_keys
+        ApiKeyListResponse(
+            id=api_key.id,
+            name=api_key.name,
+            masked_key=api_key.masked_key,
+            is_active=api_key.is_active,
+        )
+        for api_key in api_keys if api_keys
     ]
 
-@app.delete("/api/v1/api-keys/{api_key_id}/delete-key") # PRIVATE - LOGIN
+@app.patch("/api/v1/owners/{owner_id}/api-keys/{api_key_id}/deactivate-key") # PRIVATE - LOGIN
 async def deactivate_api_key(
+    owner_id: int,
     api_key_id: int,
     db: Session = Depends(get_db)
 ):
     """
     Delete (deactivate) an API key.
     """
-    api_key = db.query(ApiKey).filter(ApiKey.id == api_key_id).first()
+    api_key = db.query(ApiKey).filter(
+        ApiKey.id == api_key_id,
+        ApiKey.owner_id == owner_id,
+        ApiKey.is_active == True
+    ).first()
     if not api_key:
         raise HTTPException(status_code=404, detail="API key not found")
     
@@ -734,15 +767,14 @@ async def deactivate_api_key(
     api_key.is_active = False
     db.commit()
     
-    return {"message": "API key deactivated successfully"}
+    return
 
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
 @app.post("/api/v1/submissions", response_model=SubmissionResponse) # PRIVATE - KEY
 async def create_submission(
-    submission_data: SubmissionCreate,
-    request: Request,
+    submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
     db: Session = Depends(get_db)
 ):
@@ -753,28 +785,27 @@ async def create_submission(
     api_key_obj = await authenticate_api_key(api_key, db)
     
     owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
     for i in owner.function_pref.keys():
         if owner.function_pref[i] == True:
             checked_pref = i
+            break
     
     # Create submission record
     submission = Submission(
-        owner_id=api_key_obj.owner_id,
+        owner_id=owner.id,
         api_key_id=api_key_obj.id,
         orig_text=submission_data.orig_text,
         orig_text_length=len(submission_data.orig_text),
-        edit_text=submission_data.edit_text,
-        edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
-        custom_id=submission_data.custom_id,
         question_result=submission_data.question_result,
-        domain=submission_data.domain,
-        page_link=submission_data.page_link,
+        manual_upload=submission_data.manual_upload,
         status=ProcessingStatus.PENDING,
-        manual_upload=False,
+        meets_requirements=submission_data.meets_requirements,
         action_needed=submission_data.action_needed,
-        edited=submission_data.edited,
         function_pref=checked_pref,
-        temp_text=submission_data.temp_text
+        domain=submission_data.domain,
+        page_link=submission_data.page_link
     )
     
     db.add(submission)
@@ -809,108 +840,93 @@ async def create_submission(
                 submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
-            message = "Success! Your submission has been processed."
+            message = "Submission processed."
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            message = "Your submission has failed to process."
+            message = "Submission failed to process"
             
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
+            submission.meets_requirements = True
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
-                db.commit()
-                db.refresh(submission)
-                return SubmissionResponse(
-                    owner_id=submission.owner_id,
-                    id=submission.id,
-                    status=submission.status,
-                    orig_text_length=submission.orig_text_length,
-                    meets_requirements=False,
-                    action_needed=submission.action_needed,
-                    failure_reason=submission.failure_reason,
-                    created_at=submission.created_at,
-                    completed_processing_at=submission.completed_processing_at,
-                    message="AI score below threshold",
-                    manual_upload=submission.manual_upload,
-                    tokens_used=submission.tokens_used
-                )
+                message = "AI score below threshold"
+                submission.meets_requirements = False
+            else:
+                submission.meets_requirements = True
         
         db.commit()
         db.refresh(submission)
         
         return SubmissionResponse(
-            owner_id=submission.owner_id,
             id=submission.id,
+            owner_id=submission.owner_id,
             status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=submission.meets_requirements,
+            orig_text_prev=submission.orig_text[:30],
             action_needed=submission.action_needed,
-            failure_reason=submission.failure_reason,
-            created_at=submission.created_at,
-            completed_processing_at=submission.completed_processing_at,
-            message=message,
             manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used
+            tokens_used=submission.tokens_used,
+            created_at=submission.created_at,
+            meets_requirements=submission.meets_requirements,
+            failure_reason=submission.failure_reason,
+            completed_processing_at=submission.completed_processing_at,
+            message=message
         )
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
         return SubmissionResponse(
-            owner_id=submission.owner_id,
             id=submission.id,
+            owner_id=submission.owner_id,
             status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=False,
+            orig_text_prev=submission.orig_text[:30],
             action_needed=submission.action_needed,
-            failure_reason=submission.failure_reason,
-            created_at=submission.created_at,
-            completed_processing_at=submission.completed_processing_at,
-            message="Sorry, there was an error processing your submission. Please try again.",
             manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used
+            tokens_used=submission.tokens_used,
+            created_at=submission.created_at,
+            meets_requirements=submission.meets_requirements,
+            failure_reason=submission.failure_reason,
+            completed_processing_at=submission.completed_processing_at,
+            message="Error processing your submission"
         )
 
 @app.post("/api/v1/upload-submission", response_model=SubmissionResponse) # PRIVATE - LOGIN
 async def upload_submission(
-    submission_data: SubmissionUpload,
-    request: Request,
+    submission_data: SubmissionManual,
     db: Session = Depends(get_db)
 ):
     """
-    Create submission via upload
+    Create a new submission and process it.
     """
     key = db.query(ApiKey).filter(
         ApiKey.owner_id == submission_data.owner_id,
-        ApiKey.id == submission_data.key_id,
+        ApiKey.id == submission_data.api_key_id,
         ApiKey.is_active == True
     ).first()
     if not key:
         raise HTTPException(status_code=404, detail="No key available")
     
     owner = db.query(Owner).filter( Owner.id == submission_data.owner_id ).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
     for i in owner.function_pref.keys():
         if owner.function_pref[i] == True:
             checked_pref = i
-
+            break
+    
     # Create submission record
     submission = Submission(
-        owner_id=submission_data.owner_id,
-        api_key_id=key.id,
+        owner_id=owner.id,
+        api_key_id=submission_data.api_key_id,
         orig_text=submission_data.orig_text,
         orig_text_length=len(submission_data.orig_text),
-        edit_text=submission_data.edit_text,
-        edit_text_length=len(submission_data.edit_text) if submission_data.edit_text else 0,
-        custom_id=submission_data.custom_id,
-        question_result=submission_data.question_result,
-        domain=owner.domain,
+        manual_upload=submission_data.manual_upload,
         status=ProcessingStatus.PENDING,
-        manual_upload=True,
+        meets_requirements=submission_data.meets_requirements,
         action_needed=submission_data.action_needed,
-        edited=submission_data.edited,
-        function_pref=checked_pref,
-        temp_text=submission_data.temp_text
+        function_pref=checked_pref
     )
     
     db.add(submission)
@@ -934,81 +950,73 @@ async def upload_submission(
         
         submission.ai_result = ai_res
         submission.plag_result = plag_res
-        submission.meets_requirements = ai_res["status"] == 200 and plag_res["status"] == 200
+        submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
         
         submission.tokens_used = submission.tokens_used + res_tokens
         owner.current_tokens = owner.current_tokens - res_tokens
         owner.tokens_used = owner.tokens_used + res_tokens
         
         if submission.meets_requirements:
-            submission.temp_text = plag_res["result"]["modif_text"]
+            if "modif_text" in plag_res["result"].keys():
+                submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
-            message = "Success! Your submission has been processed."
-            
+            message = "Submission processed."
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            message = "Your submission has failed to process."
+            message = "Submission failed to process"
             
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
+            submission.meets_requirements = True
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
                 db.commit()
-                return SubmissionResponse(
-                    owner_id=submission.owner_id,
-                    id=submission.id,
-                    status=submission.status,
-                    orig_text_length=submission.orig_text_length,
-                    meets_requirements=False,
-                    action_needed=submission.action_needed,
-                    failure_reason=submission.failure_reason,
-                    created_at=submission.created_at,
-                    completed_processing_at=submission.completed_processing_at,
-                    message="AI score below threshold",
-                    manual_upload=submission.manual_upload,
-                    tokens_used=submission.tokens_used
-                )
+                db.refresh(submission)
+                message = "AI score below threshold"
+                submission.meets_requirements = False
+            else:
+                submission.meets_requirements = True
         
         db.commit()
         db.refresh(submission)
         
         return SubmissionResponse(
-            owner_id=submission_data.owner_id,
             id=submission.id,
+            owner_id=submission.owner_id,
             status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=submission.meets_requirements,
+            orig_text_prev=submission.orig_text[:30],
             action_needed=submission.action_needed,
-            failure_reason=submission.failure_reason,
-            created_at=submission.created_at,
-            completed_processing_at=submission.completed_processing_at,
-            message=message,
             manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used
-        )
+            tokens_used=submission.tokens_used,
+            created_at=submission.created_at,
+            meets_requirements=submission.meets_requirements,
+            failure_reason=submission.failure_reason,
+            completed_processing_at=submission.completed_processing_at,
+            message=message
+        )   
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
         return SubmissionResponse(
-            owner_id=submission_data.owner_id,
             id=submission.id,
+            owner_id=submission.owner_id,
             status=submission.status,
-            orig_text_length=submission.orig_text_length,
-            meets_requirements=False,
+            orig_text_prev=submission.orig_text[:30],
             action_needed=submission.action_needed,
-            failure_reason=submission.failure_reason,
-            created_at=submission.created_at,
-            completed_processing_at=submission.completed_processing_at,
-            message="Sorry, there was an error processing your submission. Please try again.",
             manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used
+            tokens_used=submission.tokens_used,
+            created_at=submission.created_at,
+            meets_requirements=submission.meets_requirements,
+            failure_reason=submission.failure_reason,
+            completed_processing_at=submission.completed_processing_at,
+            message="Error processing your submission"
         )
 
-@app.get("/api/v1/owners/{owner_id}/submissions") # PRIVATE - LOGIN
-async def list_owner_submissions(
+@app.get("/api/v1/owners/{owner_id}/submissions", response_model=List[SubmissionDetailResponse]) # PRIVATE - LOGIN
+async def get_owner_submissions(
     owner_id: int,
     skip: int = 0,
     limit: int = 50,
@@ -1033,33 +1041,34 @@ async def list_owner_submissions(
     
     # Return list response
     return [
-        {
-            "id": sub.id,
-            "status": sub.status,
-            "ai_result": sub.ai_result,
-            "plag_result": sub.plag_result,
-            "orig_text_preview": sub.orig_text[:80] + "..." if len(sub.orig_text) > 80 else sub.orig_text,
-            "orig_text": sub.orig_text,
-            "orig_text_length": sub.orig_text_length,
-            "edit_text_preview": sub.edit_text[:80] + "..." if sub.edit_text and len(sub.edit_text) > 80 else sub.edit_text,
-            "edit_text": sub.edit_text,
-            "edit_text_length": sub.edit_text_length,
-            "meets_requirements": sub.meets_requirements,
-            "manual_upload": sub.manual_upload,
-            "action_needed": sub.action_needed,
-            "domain": sub.domain,
-            "page_link": sub.page_link,
-            "created_at": sub.created_at,
-            "edited": sub.edited,
-            "edited_at": sub.edited_at,
-            "function_pref": sub.function_pref,
-            "temp_text": sub.temp_text
-        }
-        for sub in submissions
+        SubmissionDetailResponse(
+            id=sub.id,
+            owner_id=sub.owner_id,
+            api_key_id=sub.api_key_id,
+            status=sub.status,
+            action_needed=sub.action_needed,
+            manual_upload=sub.manual_upload,
+            tokens_used=sub.tokens_used,
+            created_at=sub.created_at,
+            meets_requirements=sub.meets_requirements,
+            failure_reason=sub.failure_reason,
+            completed_processing_at=sub.completed_processing_at,
+            orig_text=sub.orig_text,
+            edit_text=sub.edit_text,
+            ai_result=sub.ai_result,
+            plag_result=sub.plag_result,
+            domain=sub.domain,
+            page_link=sub.page_link,
+            function_pref=sub.function_pref,
+            edited=sub.edited,
+            edited_at=sub.edited_at,
+            temp_text=sub.temp_text,
+        )
+        for sub in submissions if submissions
     ]
 
 @app.get("/api/v1/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
-async def get_submission_detail(
+async def get_submission_detailed(
     owner_id: int,
     submission_id: int, 
     db: Session = Depends(get_db)
@@ -1074,106 +1083,9 @@ async def get_submission_detail(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
-    return SubmissionDetailResponse(
-        owner_id=submission.owner_id,
-        id=submission.id,
-        status=submission.status,
-        orig_text=submission.orig_text,
-        orig_text_length=submission.orig_text_length,
-        edit_text=submission.edit_text,
-        edit_text_length=submission.edit_text_length,
-        meets_requirements=submission.meets_requirements,
-        action_needed=submission.action_needed,
-        failure_reason=submission.failure_reason,
-        domain=submission.domain,
-        created_at=submission.created_at,
-        completed_processing_at=submission.completed_processing_at,
-        manual_upload=submission.manual_upload,
-        edited=submission.edited,
-        ai_result=submission.ai_result,
-        plag_result=submission.plag_result,
-        function_pref=submission.function_pref,
-        tokens_used=submission.tokens_used,
-        temp_text=submission.temp_text,
-        message="Submission details retrieved successfully"
-    )
-
-@app.get("/api/v1/owners/{owner_id}/submissions/stats") # PRIVATE - LOGIN
-async def get_submission_stats(
-    owner_id: int,
-    db: Session = Depends(get_db)
-):
-
-    """Get submission statistics for an owner."""
-    # Verify owner exists
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
+    return submission
     
-    # Get basic stats
-    total = db.query(Submission).filter(Submission.owner_id == owner_id).count()
-    successful = db.query(Submission).filter(
-        Submission.owner_id == owner_id,
-        Submission.status == ProcessingStatus.SUCCESS
-    ).count()
-    failed = db.query(Submission).filter(
-        Submission.owner_id == owner_id,
-        Submission.status == ProcessingStatus.FAILED
-    ).count()
-    pending = db.query(Submission).filter(
-        Submission.owner_id == owner_id,
-        Submission.status.in_([ProcessingStatus.PENDING, ProcessingStatus.PROCESSING, ProcessingStatus.TIMEOUT])
-    ).count()
-    
-    return {
-        "total_submissions": total,
-        "successful_submissions": successful,
-        "failed_submissions": failed,
-        "pending_submissions": pending,
-        "success_rate": round((successful / total * 100) if total > 0 else 0, 2)
-    }
-    
-@app.get("/api/v1/submissions/{submission_id}", response_model=SubmissionResponse) # PRIVATE - LOGIN
-async def get_submission_status(
-    submission_id: int, 
-    api_key: str,
-    db: Session = Depends(get_db)
-):
-    """Get the status of a submission by ID."""
-    # Authenticate API key
-    api_key_obj = await authenticate_api_key(api_key, db)
-    
-    # Get submission and verify ownership
-    submission = db.query(Submission).filter(
-        Submission.id == submission_id,
-        Submission.user_id == api_key_obj.user_id
-    ).first()
-    
-    if not submission:
-        raise HTTPException(status_code=404, detail="Submission not found")
-    
-    # Determine appropriate message based on status
-    message_map = {
-        ProcessingStatus.PENDING: "Submission is queued for processing",
-        ProcessingStatus.PROCESSING: "Submission is currently being processed",
-        ProcessingStatus.SUCCESS: "Submission processed successfully",
-        ProcessingStatus.FAILED: f"Submission failed: {submission.failure_reason}",
-        ProcessingStatus.TIMEOUT: "Submission is being processed in background"
-    }
-    
-    return SubmissionResponse(
-        id=submission.id,
-        status=submission.status,
-        orig_text_length=submission.orig_text_length,
-        edit_text_length=submission.edit_text_length,
-        meets_requirements=submission.meets_requirements,
-        failure_reason=submission.failure_reason,
-        created_at=submission.created_at,
-        completed_processing_at=submission.completed_processing_at,
-        message=message_map.get(submission.status, "Status unknown")
-    )
-    
-@app.delete("/api/v1/owners/{owner_id}/submissions/{submission_id}/delete-submission")
+@app.delete("/api/v1/owners/{owner_id}/submissions/{submission_id}/delete-submission") # PRIVATE - LOGIN
 async def delete_submission(
     submission_id: int,
     owner_id: int,
@@ -1194,34 +1106,35 @@ async def delete_submission(
         "message": "Successfully deleted submission"
     }
 
-@app.post("/api/v1/owners/{owner_id}/submissions/{submission_id}/edit-submission")
+@app.patch("/api/v1/owners/{owner_id}/submissions/{submission_id}/edit-submission") # PRIVATE - LOGIN
 async def edit_submission(
     submission_data: SubmissionEdit,
     db: Session = Depends(get_db)
 ):
     submission = db.query(Submission).filter(
-        Submission.id == submission_data.id,
+        Submission.id == submission_data.entry_id,
         Submission.owner_id == submission_data.owner_id
     ).first()
     
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    submission.edit_text = submission_data.new_text
-    submission.edit_text_length = len(submission_data.new_text)
+    submission.edit_text = submission_data.edit_text
     submission.edited = True
     submission.edited_at = datetime.now()
     
+    # Handles sub if ACTION_NEEDED is True
+    if submission.action_needed:
+        # RESCAN FOR PLAGIARISM
+        pass
+    
     db.commit()
     
-    return {
-        "message": "Submission edited successfully"
-    }
+    return
 
 # -- CREATE WATERMARK
-@app.post("/api/v1/watermarks")
+@app.post("/api/v1/watermarks")  # PRIVATE - KEY/LOGIN
 async def create_watermark(
-    submission_data: SubmissionCreate,
     request: Request,
     api_key: str = Depends(get_api_key_from_header),
     db: Session = Depends(get_db)
@@ -1238,7 +1151,7 @@ async def create_watermark(
 # LOG IN
 @app.post("/api/v1/auth/login")
 async def login(
-    login_data: OwnerLogin,
+    login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):
     """Email and password (2FA??)"""
@@ -1247,7 +1160,7 @@ async def login(
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     
     return {
-        "email": login_data.email,
+        "email": owner.email,
         "name": owner.name,
         "id": owner.id
     }

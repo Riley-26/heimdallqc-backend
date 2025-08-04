@@ -3,6 +3,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
 from datetime import datetime, timedelta
+from .verified_site import VerifiedSite
 
 plans_dict = {
     "None": {
@@ -155,28 +156,4 @@ class Owner(Base):
             self.current_tokens = self.plan.get("tokens", 0)
             # Set next month end
             self.verified_month_end = self.verified_month_end + timedelta(days=30)
-    
-    
-class Verified_site(Base):
-    __tablename__ = "verified_sites"
-    
-    # Primary key
-    id = Column(Integer, primary_key=True, index=True)
-    
-    domain = Column(String(100), nullable=False)
-    
-    # Status
-    is_active = Column(Boolean, default=True)
-    
-    # Usage tracking
-    total_requests = Column(Integer, default=0)
-    last_used_at = Column(DateTime(timezone=True), nullable=True)
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    # Relationships
-    owner = relationship("Owner", backref="verified_site")
-    
-    def __repr__(self):
-        return f"<Verified_site(id={self.id}, domain={self.domain})>"
+        

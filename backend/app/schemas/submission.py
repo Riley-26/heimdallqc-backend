@@ -1,65 +1,65 @@
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, field_validator
-from enum import Enum
-import enum
+from typing import List, Optional, Dict
+from pydantic import BaseModel, Field
+
+# -- BASE MODEL
 
 class SubmissionBase(BaseModel):
-    owner_id: Optional[int] = None
+    """Base fields for all submissions"""
     orig_text: str = Field(..., min_length=1, max_length=10000)
-    edit_text: Optional[str] = Field(None, max_length=10000)
-    custom_id: Optional[int] = None
-    question_result: Optional[bool] = None
-    manual_upload: bool = False
+    meets_requirements: bool = False
     action_needed: bool = False
-    edited: bool = False
-    edited_at: Optional[datetime] = None
-    function_pref: Optional[str] = None
-    tokens_used: int = 0
-    temp_text: Optional[str] = None
-
-
-class SubmissionUpload(SubmissionBase):
-    orig_text: str
-    key_id: str
-    domain: Optional[str] = Field(None, max_length=1000)
     
     
-class SubmissionCreate(SubmissionBase):
-    orig_text: str
+# -- INPUT MODELS
+    
+class SubmissionAuto(SubmissionBase):
+    """Fields required when API creates a new submission"""
     question_result: bool
-    domain: Optional[str] = Field(None, max_length=1000)
-    page_link: Optional[str] = Field(None, max_length=1000)
-    
+    manual_upload: bool = False
+    domain: str
+    page_link: str
+
+class SubmissionManual(SubmissionBase):
+    """Fields required when manually uploading"""
+    owner_id: int
+    api_key_id: str
+    manual_upload: bool = True
     
 class SubmissionEdit(BaseModel):
-    owner_id: Optional[int] = None
-    id: int
-    new_text: str
+    """Fields for editing an existing submission"""
+    entry_id: int
+    owner_id: int
+    edit_text: str
+    
 
+# -- RESPONSE MODELS    
 
-class SubmissionResponse(BaseModel):
+class SubmissionResponseBase(BaseModel):
+    """Base fields for all submission responses"""
     id: int
     owner_id: int
     status: str
-    orig_text_length: int
-    meets_requirements: Optional[bool] = None
+    orig_text_prev: Optional[str] = None
     action_needed: bool
-    failure_reason: Optional[str] = None
-    created_at: datetime
-    completed_processing_at: Optional[datetime] = None
-    message: Optional[str] = None
     manual_upload: bool
     tokens_used: int
-
+    created_at: datetime
+    
     class Config:
         field_attributes = True
-
-
+        
+class SubmissionResponse(SubmissionResponseBase):
+    """Basic response for general use"""
+    meets_requirements: bool
+    failure_reason: Optional[str] = None
+    completed_processing_at: Optional[datetime] = None
+    message: Optional[str] = None
+    
 class SubmissionDetailResponse(SubmissionResponse):
-    """More detailed response for admin/owner views"""
+    """Detailed response for admin/owner views"""
     orig_text: str
-    edit_text: Optional[str]
+    edit_text: Optional[str] = None
     ai_result: dict
     plag_result: dict
     domain: Optional[str] = None
@@ -68,6 +68,8 @@ class SubmissionDetailResponse(SubmissionResponse):
     edited_at: Optional[datetime] = None
     function_pref: str
     temp_text: Optional[str] = Field(None, max_length=10000)
-
-    class Config:
-        field_attributes = True
+    
+class SubmissionList(SubmissionResponse):
+    """Container for list of submissions"""
+    submissions: List[SubmissionDetailResponse]
+    total: int

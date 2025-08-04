@@ -3,42 +3,48 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, EmailStr
 from enum import Enum
 
+# -- BASE MODEL
 
 class ApiKeyBase(BaseModel):
     name: str
 
 
+# -- INPUT MODELS
+
 class ApiKeyCreate(ApiKeyBase):
-    pass
+    owner_id: int
 
 
-class ApiKeyUpdate(BaseModel):
-    name: Optional[str] = None
-    is_active: Optional[bool] = None
+# -- RESPONSE MODELS
 
-
-class ApiKeyResponse(ApiKeyBase):
+class ApiKeyResponse(BaseModel):
     id: int
     owner_id: int
-    key: str  # Full key returned only on creation
+    name: str
     is_active: bool
-    total_requests: int
-    last_used_at: Optional[datetime] = None
-    created_at: datetime
 
     class Config:
         field_attributes = True
-
+        
+class ApiKeyReveal(ApiKeyResponse):
+    key: str
+        
+class ApiKeyDetailResponse(ApiKeyResponse):
+    masked_key: str
+    created_at: datetime
+    total_requests: int
+    last_used_at: Optional[datetime] = None
 
 class ApiKeyListResponse(BaseModel):
-    """Response for listing API keys (without exposing full key)"""
+    """Response for listing API key names"""
     id: int
     name: str
     masked_key: str
     is_active: bool
-    total_requests: int
-    last_used_at: Optional[datetime] = None
-    created_at: datetime
 
     class Config:
         field_attributes = True
+        
+class ApiKeyList(BaseModel):
+    keys: List[ApiKeyListResponse]
+    total: int
