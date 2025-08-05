@@ -494,13 +494,15 @@ async def get_owner_details(
         tokens_used=owner.tokens_used,
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
-        created_at=owner.created_at,
+        domain_id=owner.domain_id,
+        verified_month_end=owner.verified_month_end,
         plan=owner.plan,
         function_pref=owner.function_pref,
         ui_pref=owner.ui_pref,
         ai_threshold_option=owner.ai_threshold_option,
-        verified_at=owner.verified_at,
-        verified_month_end=owner.verified_month_end
+        created_at=owner.created_at,
+        updated_at=owner.updated_at,
+        verified_at=owner.verified_at
     )
 
 # -- DEACTIVATE/DELETE OWNER

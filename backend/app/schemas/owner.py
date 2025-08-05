@@ -94,9 +94,9 @@ class OwnerDetailResponse(OwnerResponse):
     """Detailed owner response with preferences"""
     domain_id: int
     verified_month_end: Optional[datetime] = None
-    plan: Dict[str, dict]
-    function_pref: Dict[str, bool]
-    ui_pref: Dict[str, str]
+    plan: dict
+    function_pref: dict
+    ui_pref: dict
     ai_threshold_option: int
     created_at: datetime
     updated_at: datetime
