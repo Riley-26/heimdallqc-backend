@@ -5,6 +5,7 @@ export interface WidgetConfig {
     darkTheme?: boolean;
     initialOpen?: boolean;
     onEvent?: (eventName: string, data?: any) => void;
+    watermarkSize?: number
 }
 
 export interface WidgetProps {
@@ -36,9 +37,25 @@ export interface WidgetActions {
 }
 
 export interface UseWidgetResult {
-    WidgetComponent: any;
+    HMDLWidget: () => React.JSX.Element;
     widgetState: WidgetState;
     widgetActions: WidgetActions;
+    HMDLWatermark: (watermarkProps: {
+        id: number
+        aiResult: number
+        plagResult: number
+        citation?: string[]
+    }) => React.JSX.Element;
     isLoading: boolean;
-    error: Error | null;
+    error: string | null;
+}
+
+export interface WatermarkProps {
+    items: {
+        id: number
+        plagResult: number
+        aiResult: number
+        citation?: string[]
+    }
+    size?: number
 }

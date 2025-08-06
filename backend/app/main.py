@@ -17,13 +17,14 @@ from urllib.parse import urlparse
 import requests
 import os
 import json
+from jose import jwt, JWTError
 
 from .db.database import get_db
 from .models.owner import Owner
 from .models.verified_site import VerifiedSite
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .schemas.owner import LoginRequest, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
+from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
@@ -411,6 +412,7 @@ def redact_text(text: str, sources: list):
 # PUBLIC: ANYONE CAN ACCESS
 # PRIVATE - KEY: NEEDS VALID API KEY TO ACCESS
 # PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
+# PRIVATE - JWT: ACCESSED VIA JWT
 
 @app.post("/api/v1/owners") # PUBLIC
 async def create_owner(
@@ -443,6 +445,23 @@ async def create_owner(
     db.refresh(owner)
     
     return
+
+@app.post("/api/v1/owners/is-valid") # PRIVATE - JWT
+async def confirm_jwt(
+    token: OwnerJwt,
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm JWT validity
+    """
+    owner = db.query(Owner).filter(
+        Owner.id == token.id,
+        Owner.email == token.email
+    ).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    return True
 
 @app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(

@@ -9,7 +9,7 @@ import { Alert } from './Alert';
 import { Checkbox, FormGroup, FormControlLabel, ThemeProvider } from '@mui/material';
 import { ArrowForwardIos, ArrowBackIos, MoreHoriz } from '@mui/icons-material';
 
-export const HMDLWidget: React.FC<WidgetProps> = ({
+export const WidgetComponent: React.FC<WidgetProps> = ({
     config,
     onClose,
     onOpen,

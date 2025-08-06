@@ -66,6 +66,14 @@ class TokenPurchase(BaseModel):
     """Purchase additional tokens"""
     owner_id: int
     pack_name: str = Field(..., pattern='^(sm|md|lg|xl)$')
+    
+class OwnerJwt(BaseModel):
+    name: Optional[str] = None
+    email: str
+    sub: Optional[str] = None
+    id: int
+    exp: int
+    iat: Optional[int] = None
 
 
 # -- RESPONSE SCHEMAS

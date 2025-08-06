@@ -1,8 +1,9 @@
 import React, { memo, useMemo } from "react"
 import { useState, useEffect, useCallback } from "react"
-import { HMDLWidget } from "../components/Widget"
-import { WidgetConfig, UseWidgetResult, WidgetState } from "../types"
+import { WidgetComponent } from "../components/Widget"
+import { WidgetConfig, UseWidgetResult, WidgetState, WatermarkProps, WidgetProps } from "../types"
 import { apiService } from "../services/apiService"
+import { WatermarkComponent } from "../components/Watermark"
 
 export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     // Default configuration with fallbacks
@@ -11,6 +12,7 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         darkTheme: config.darkTheme,
         initialOpen: config.initialOpen || false,
         onEvent: config.onEvent || (() => {}),
+        watermarkSize: config.watermarkSize || 100
     }
 
     // State management
@@ -20,7 +22,7 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const [isLoading, setIsLoading] = useState<boolean>(false)
     const [confirmed, setConfirmed] = useState<boolean>(false)
     const [checked, setChecked] = useState<boolean>(false)
-    const [error, setError] = useState<Error | null>(null)
+    const [error, setError] = useState<string | null>(null)
 
     // Combined state object
     const widgetState: WidgetState = {
@@ -53,8 +55,8 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         submit: async (data: string) => {
             if (confirmed) {
                 const result = await createSubmission(data)
-                console.log(result)
                 widgetConfig.onEvent?.("submitted", data)
+                return result
             } else {
                 setShowAlert(true)
                 setIsOpen(true)
@@ -79,13 +81,20 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         if (confirmed) {
             try {
                 const submission = await apiService.createSubmission(text, widgetConfig.apiKey, checked, window.location.host, window.location.origin)
-                //const watermark = await createWatermark(submission)
+                const watermark = await createWatermark(submission)
                 return {
-                    "submission": submission,
-                    //"watermark": watermark
+                    "needsAction": false,
+                    "modifiedText": ""
                 }
-            } catch (err: any) {
-                setError(err.message)
+            } catch (err: unknown) {
+                if (err instanceof Error){
+                    setError(err.message)
+                } else {
+                    setError("An error occurred")
+                }
+                return {
+                    "needsAction": false
+                }
             }
         }
     }
@@ -95,14 +104,17 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
             const watermark = await apiService.createWatermark(data, widgetConfig.apiKey)
 
             return watermark
-        } catch (err: any) {
-            setError(err.message)
+        } catch (err: unknown) {
+            if (err instanceof Error){
+                setError(err.message)
+            } else {
+                setError("An error occurred")
+            }
         }
     }
 
-    // Widget component with required props
-    const WidgetComponent = () => (
-        <HMDLWidget
+    const HMDLWidget = () => (
+        <WidgetComponent
             config={widgetConfig}
             onClose={widgetActions.close}
             onOpen={widgetActions.open}
@@ -113,10 +125,15 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         />
     )
 
+    const HMDLWatermark = (items: any) => (
+        <WatermarkComponent items={items} size={widgetConfig.watermarkSize} />
+    )
+
     return {
-        WidgetComponent,
+        HMDLWidget,
         widgetState,
         widgetActions,
+        HMDLWatermark,
         isLoading,
         error,
     }

@@ -4,12 +4,18 @@ import "./App.css"
 
 function App() {
     const textareaRef = useRef(null)
+    const watermarkProps = {
+        id: 1,
+        plagResult: 40,
+        aiResult: 65,
+        citation: ["hello"]
+    }
 
-    const { WidgetComponent, widgetState, widgetActions, isLoading, error } =
+    const { HMDLWidget, widgetState, widgetActions, HMDLWatermark, isLoading, error } =
         useHMDL({
             apiKey: "vhzXGP2n4WahshqNIraKHa25UPpEvoarvZ3ogti2biInXjNj",
             darkTheme: true,
-            initialOpen: true,
+            initialOpen: true
         })
 
     // EVENT LISTENERS FOR ALL SUBMITS
@@ -33,6 +39,9 @@ function App() {
                     }}
                 ></textarea>
             </div>
+            <div>
+                {HMDLWatermark(watermarkProps)}
+            </div>
             <div
                 style={{
                     display: "flex",
@@ -40,7 +49,7 @@ function App() {
                     justifyContent: "center",
                 }}
             >
-                {WidgetComponent()}
+                {HMDLWidget()}
             </div>
             <button
                 onClick={() => {
