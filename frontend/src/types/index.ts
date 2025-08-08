@@ -40,22 +40,23 @@ export interface UseWidgetResult {
     HMDLWidget: () => React.JSX.Element;
     widgetState: WidgetState;
     widgetActions: WidgetActions;
-    HMDLWatermark: (watermarkProps: {
-        id: number
-        aiResult: number
-        plagResult: number
-        citation?: string[]
-    }) => React.JSX.Element;
+    HMDLWatermark: (watermarkProps: WatermarkItems) => React.JSX.Element;
     isLoading: boolean;
     error: string | null;
 }
 
 export interface WatermarkProps {
-    items: {
-        id: number
-        plagResult: number
-        aiResult: number
-        citation?: string[]
-    }
+    items: WatermarkItems
     size?: number
+}
+
+interface WatermarkItems {
+    id: number
+    plagResult: number
+    aiResult: number
+    citations?: {
+        [key:string]: {
+            [key:string]: string
+        }
+    }
 }

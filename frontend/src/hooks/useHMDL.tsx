@@ -12,7 +12,7 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
         darkTheme: config.darkTheme,
         initialOpen: config.initialOpen || false,
         onEvent: config.onEvent || (() => {}),
-        watermarkSize: config.watermarkSize || 100
+        watermarkSize: config.watermarkSize
     }
 
     // State management

@@ -8,7 +8,16 @@ function App() {
         id: 1,
         plagResult: 40,
         aiResult: 65,
-        citation: ["hello"]
+        citations: {
+            "H0": {
+                "title": "yeah",
+                "link": "hello"
+            },
+            "H1": {
+                "title": "yeah2",
+                "link": "hello2"
+            }
+        }
     }
 
     const { HMDLWidget, widgetState, widgetActions, HMDLWatermark, isLoading, error } =
@@ -40,7 +49,7 @@ function App() {
                 ></textarea>
             </div>
             <div>
-                {HMDLWatermark(watermarkProps)}
+                { HMDLWatermark(watermarkProps) }
             </div>
             <div
                 style={{
@@ -49,7 +58,7 @@ function App() {
                     justifyContent: "center",
                 }}
             >
-                {HMDLWidget()}
+                { HMDLWidget() }
             </div>
             <button
                 onClick={() => {

@@ -216,18 +216,18 @@
 */
 
 .watermark {
-    height: 100px;
-    width: 100px;
+    opacity: 60%;
     transition: all 0.25s ease;
 }
 
-.watermark:hover {
+.watermark:hover .watermarkImage{
     transform: scale(95%);
-    filter: brightness(50%);
+    filter: brightness(50%) saturate(0) contrast(60%);
 }
 
 .watermarkImage {
     filter: saturate(0) contrast(60%);
+    transition: all 0.25s ease;
 }
 
 .watermarkLogoName {

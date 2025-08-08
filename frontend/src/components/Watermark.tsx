@@ -28,24 +28,25 @@ const CustomTooltip = styled(
     }
 `;
 
-export const WatermarkComponent: React.FC<WatermarkProps> = ({ items, size }) => {
+export const WatermarkComponent: React.FC<WatermarkProps> = ({ items, size=70 }) => {
 
     return (
         <CustomTooltip title={
             <div style={{ padding: "12px 8px", position: "relative" }}>
-                <div style={{ position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center" }}>
+                <a href="http://heimdallqc.com" target="_blank" style={{ position: "absolute", top: "0", right: "0", display: "flex", alignItems: "center" }}>
                     <img src="/Asset 8.svg" style={{ width: "30px", height: "30px" }} />
                     <h1 className={`${styles.watermarkLogoName}`} style={{ marginTop: "4px", marginLeft: "6px" }}>HEIMDALL®</h1>
-                </div>
+                </a>
                 <h1 className={`${styles.watermarkTitle}`}>Content Analysis</h1>
                 {
-                    items.citation && items.citation.length > 0 && <div style={{ marginTop: "12px" }}>
+                    items.citations && Object.keys(items.citations).length > 0 &&<div style={{ marginTop: "12px" }}>
                         {
-                            items.citation.map((val, key) => {
+                            Object.keys(items.citations).map((val, key) => {
                                 return <div key={key} className={`${styles.watermarkCitation}`}>
-                                    <p>[{key}]</p>
+                                    <p style={{ color: "#aaa" }}>[{`${val}`}]</p>
                                     <p>
-                                        {val}
+                                        {`${items.citations?.[val]["link"]} - `}
+                                        <a href={items.citations?.[val]["link"]} style={{ color: "#8BAFC7", textDecoration: "underline" }}>{`${items.citations?.[val]["title"]}`}</a>
                                     </p>
                                 </div>
                             })
@@ -121,7 +122,7 @@ export const WatermarkComponent: React.FC<WatermarkProps> = ({ items, size }) =>
             placement='top'
             
         >
-            <div className={`${styles.watermark}`}>
+            <div className={`${styles.watermark}`} style={{ width: `${size}px` }}>
                 <img src="/Asset 8.svg" className={`${styles.watermarkImage}`} style={{ opacity: `${(items.plagResult >= 70 ? items.plagResult : items.aiResult)}%` }}/>
             </div>
         </CustomTooltip>
