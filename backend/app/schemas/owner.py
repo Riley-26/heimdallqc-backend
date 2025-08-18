@@ -49,6 +49,7 @@ class OwnerUpdate(BaseModel):
 
 class SettingsUpdate(BaseModel):
     """Update owner preferences"""
+    owner_id: int
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=0, le=99)
@@ -56,7 +57,7 @@ class SettingsUpdate(BaseModel):
 class PlanUpdate(BaseModel):
     """Update plan"""
     owner_id: int
-    plan_name: str = Field(..., pattern='^(extrinsic|intrinsic|combo|none)$')
+    plan_name: str = Field(..., pattern='^(Extrinsic|Intrinsic|Combo|None)$')
     
 class PlanCancel(BaseModel):
     """Cancel plan"""

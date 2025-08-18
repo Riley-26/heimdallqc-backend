@@ -54,8 +54,9 @@ class Submission(Base):
     edited_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    owner = relationship("Owner", backref="submissions")
+    owner = relationship("Owner", back_populates="submissions")
     api_key_obj = relationship("ApiKey", back_populates="submissions")
+    watermark = relationship("Watermark", back_populates="submission", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Submission(id={self.id}, status={self.status}, owner_id={self.owner_id})>"

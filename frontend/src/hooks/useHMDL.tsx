@@ -80,11 +80,15 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
     const createSubmission = async (text: string) => {
         if (confirmed) {
             try {
+
+                // WEBHOOK - CREATE SUBMISSION AND WATERMARK, LISTEN FOR RESULT
+                // RESULT - MODIFIED TEXT, WATERMARK ID, USER SAVES TEXT AND ID TO DB
+
                 const submission = await apiService.createSubmission(text, widgetConfig.apiKey, checked, window.location.host, window.location.origin)
-                const watermark = await createWatermark(submission)
                 return {
-                    "needsAction": false,
-                    "modifiedText": ""
+                    "status": 200,
+                    "modifiedText": submission.temp_text,
+                    "watermarkId": submission.watermark_id
                 }
             } catch (err: unknown) {
                 if (err instanceof Error){
@@ -93,22 +97,8 @@ export const useHMDL = (config: WidgetConfig): UseWidgetResult => {
                     setError("An error occurred")
                 }
                 return {
-                    "needsAction": false
+                    "status": 400
                 }
-            }
-        }
-    }
-
-    const createWatermark = async (data:any) => {
-        try {
-            const watermark = await apiService.createWatermark(data, widgetConfig.apiKey)
-
-            return watermark
-        } catch (err: unknown) {
-            if (err instanceof Error){
-                setError(err.message)
-            } else {
-                setError("An error occurred")
             }
         }
     }

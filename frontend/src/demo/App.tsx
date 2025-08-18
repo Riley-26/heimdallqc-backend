@@ -22,7 +22,7 @@ function App() {
 
     const { HMDLWidget, widgetState, widgetActions, HMDLWatermark, isLoading, error } =
         useHMDL({
-            apiKey: "vhzXGP2n4WahshqNIraKHa25UPpEvoarvZ3ogti2biInXjNj",
+            apiKey: "dHsSwZjcIKRuRtqRB5jMOVZyU74BqIhu1BRXEtMFhDZM7YgU",
             darkTheme: true,
             initialOpen: true
         })

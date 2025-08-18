@@ -7,24 +7,28 @@ from .verified_site import VerifiedSite
 
 plans_dict = {
     "None": {
+        "id": "none",
         "name": "none",
         "tokens": 0,
         "price": 0
     },
     "Extrinsic": {
+        "id": "price_1RvgtBR9LI2BudDrjnZpax1X",
         "name": "extrinsic",
         "tokens": 8000,
         "price": 34
     },
     "Intrinsic": {
+        "id": "price_1Rvh1DR9LI2BudDrp05uZgkV",
         "name": "intrinsic",
         "tokens": 6000,
-        "price": 27
+        "price": 26
     },
     "Combo": {
+        "id": "price_1Rvh1SR9LI2BudDrHW0tFWz9",
         "name": "combo",
         "tokens": 16500,
-        "price": 59
+        "price": 55
     }
 }
 
@@ -46,7 +50,6 @@ class Tokens:
         "price": 175
     }
     
-
 class Owner(Base):
     __tablename__ = "owners"
 
@@ -68,10 +71,13 @@ class Owner(Base):
     company = Column(String(200), nullable=True)
     
     # Account status
+    customer_id = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     verified_month_end = Column(DateTime(timezone=True), nullable=True)
     plan = Column(JSON, nullable=False, default=plans_dict["None"])
+    subscription_id = Column(String(255), nullable=True)
+    session_ids = Column(JSON, nullable=False, default=list)
     
     # Settings
     function_pref = Column(JSON, nullable=False, default=lambda: {
@@ -83,7 +89,7 @@ class Owner(Base):
         "widget": True,
         "watermarks": True
     })
-    ai_threshold_option = Column(Integer, nullable=False, default=0)
+    ai_threshold_option = Column(Integer, nullable=False, default=40)
     
     # Usage tracking
     current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)
@@ -98,6 +104,9 @@ class Owner(Base):
     
     # Relationships
     api_keys = relationship("ApiKey", back_populates="owner", cascade="all, delete-orphan")
+    submissions = relationship("Submission", back_populates="owner")
+    watermarks = relationship("Watermark", back_populates="owner")
+    payments = relationship("Payment", back_populates="owner")
 
     def __repr__(self):
         return f"<Owner(id={self.id}, email={self.email})>"
@@ -109,6 +118,7 @@ class Owner(Base):
             # Only increase tokens if tokens are short
             if self.current_tokens < plans_dict[new_plan]["tokens"]:
                 tokens = plans_dict[new_plan]["tokens"]
+            self.plan = plans_dict[new_plan]
             
             return {
                 "plan": plans_dict[new_plan],
@@ -141,14 +151,17 @@ class Owner(Base):
             if key in self.preferences:
                 self.preferences[key] = value
     
-    def verify_owner(self):
-        """Call this when owner is verified."""
-        self.is_verified = True
-        now = datetime.now()
-        self.verified_at = now
-        # Set month end to 30 days from now
-        self.verified_month_end = now + timedelta(days=30)
-        
+    def verify_owner(self, cancelled):
+        """Call this when owner upgrades to a paid plan."""
+        if not cancelled:
+            now = datetime.now()
+            self.is_verified = True
+            self.verified_at = now
+            # Set month end to 30 days from now
+            self.verified_month_end = now + timedelta(days=30)
+        else:
+            self.is_verified = False
+            
     def reset_monthly_tokens(self):
         """Call this to reset tokens if month has passed."""
         now = datetime.now()

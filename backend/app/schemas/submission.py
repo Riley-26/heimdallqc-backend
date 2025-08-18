@@ -10,7 +10,6 @@ class SubmissionBase(BaseModel):
     meets_requirements: bool = False
     action_needed: bool = False
     
-    
 # -- INPUT MODELS
     
 class SubmissionAuto(SubmissionBase):
@@ -32,7 +31,6 @@ class SubmissionEdit(BaseModel):
     owner_id: int
     edit_text: str
     
-
 # -- RESPONSE MODELS    
 
 class SubmissionResponseBase(BaseModel):
@@ -69,7 +67,7 @@ class SubmissionDetailResponse(SubmissionResponse):
     function_pref: str
     temp_text: Optional[str] = Field(None, max_length=10000)
     
-class SubmissionList(SubmissionResponse):
-    """Container for list of submissions"""
-    submissions: List[SubmissionDetailResponse]
-    total: int
+class SubmissionHookResponse(BaseModel):
+    """Response for webhook, owners save this data"""
+    watermark_id: int
+    temp_text: str

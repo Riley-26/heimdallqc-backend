@@ -1,12 +1,13 @@
 import math
 import secrets
-from typing import List
+from typing import List, Union
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import asyncio
 import time
 import logging
@@ -18,16 +19,21 @@ import requests
 import os
 import json
 from jose import jwt, JWTError
+import stripe
 
 from .db.database import get_db
 from .models.owner import Owner
 from .models.verified_site import VerifiedSite
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
+from .models.watermark import Watermark
+from .models.payment import Payment
 from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
-from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
+from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
+from .schemas.watermark import WatermarkCreate
+from .schemas.payment import PaymentCreate, PaymentListResponse
 
 MARKUP_FACTOR = 15
 
@@ -42,7 +48,12 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "https://heimdallqc.com"],  # Frontend URL
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://heimdallqc.com",
+        "https://checkout.stripe.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -463,7 +474,7 @@ async def confirm_jwt(
     
     return True
 
-@app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PUBLIC
 async def get_owner(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -489,7 +500,7 @@ async def get_owner(
         plagiarisms_prevented=owner.plagiarisms_prevented
     )
     
-@app.post("/api/v1/owners/{owner_id}/detailed", response_model=OwnerDetailResponse)
+@app.post("/api/v1/owners/{owner_id}/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
 async def get_owner_details(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -528,71 +539,103 @@ async def get_owner_details(
 
 # -- GET PLAN USAGE
 
-@app.post("/api/v1/owners/update-plan")
-async def update_plan(
-    request: PlanUpdate,
+@app.post("/api/v1/owners/{owner_id}/invoices", response_model=List[PaymentListResponse])
+async def get_owner_invoices(
+    owner_id: int,
     db: Session = Depends(get_db)
 ):
-    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    owner = db.query(Owner).filter(Owner.id == owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
-    new_plan = owner.change_plan(request.plan_name)
-    if new_plan:
-        
-        # ----- PAYMENT -----
-        
-        owner.plan = new_plan["plan"]
-        owner.current_tokens = new_plan["tokens"]
-        
-        owner.is_verified = True
-        owner.verify_owner()
-        
-        db.commit()
+    payments = db.query(Payment).filter(Payment.owner_id == owner_id).all()
+    if not payments:
+        raise HTTPException(status_code=404, detail="Payments not found")
     
-    return
+    return [
+        PaymentListResponse(
+            owner_id=payment.owner_id,
+            status=payment.status,
+            name=payment.name,
+            purchase_type=payment.purchase_type,
+            invoice_id=payment.invoice_id,
+            value=payment.value,
+            created_at=payment.created_at
+        )
+        for payment in payments if payments
+    ]
     
 @app.patch("/api/v1/owners/cancel-plan")
 async def cancel_plan(
     request: PlanCancel,
     db: Session = Depends(get_db)
-):
-    from .models.owner import plans_dict
-    
+):  
+    """Cancel owners plan, providing a refund of the unused amount. Must have an active subscription."""
     owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
+    if not owner.is_verified or not owner.subscription_id:
+        raise HTTPException(status_code=400, detail="Unable to cancel")
     
-    owner.plan = plans_dict["None"]
-    owner.is_verified = False
+    payment = db.query(Payment).filter(Payment.subscription_id == owner.subscription_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
     
-    db.commit()
+    subscription = stripe.Subscription.retrieve(
+        owner.subscription_id,
+        api_key=os.getenv("STRIPE_KEY")
+    )
     
-    return
+    if subscription and subscription.status == 'active':
+        # Cancel plan first
+        canceled_subscription = stripe.Subscription.delete(
+            owner.subscription_id,
+            api_key=os.getenv("STRIPE_KEY"),
+            invoice_now=True,
+            prorate=True
+        )
+        
+        if canceled_subscription:
+            owner.change_plan("None")
+            owner.is_verified = False
+            owner.subscription_id = ''
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="Failed to cancel subscription")
+        
+        # Calculate refund from latest invoice only, ignores prorates
+        if payment.payment_intent:
+            latest_invoice = stripe.Invoice.retrieve(
+                subscription.latest_invoice,
+                api_key=os.getenv("STRIPE_KEY")
+            )
+            
+            sub_data = subscription["items"]["data"][0]
+            current_time = datetime.now().timestamp()
+            period_start = sub_data["current_period_start"]
+            period_end = sub_data["current_period_end"]
+            total_period = period_end - period_start
+            used_period = current_time - period_start
+            
+            refund_amount = max(0, math.floor(int(latest_invoice.amount_paid * (1 - (used_period / total_period)))/100)*100)
+            
+            refund = stripe.Refund.create(
+                payment_intent=payment.payment_intent,
+                amount=refund_amount,
+                api_key=os.getenv("STRIPE_KEY")
+            )
+            
+            if refund:
+                payment.status = 'refunded'
+                return {
+                    "message": "Successfully cancelled subscription and refund processed"
+                }
 
-@app.patch("/api/v1/owners/buy-tokens")
-async def buy_tokens(
-    request: TokenPurchase,
-    db: Session = Depends(get_db)
-):
-    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    
-    added_tokens = owner.add_tokens(request.pack_name)
-    if added_tokens != None:
-        
-        # ----- PAYMENT -----
-        
-        owner.current_tokens = added_tokens["tokens"]
+        return {
+            "message": "Unable to create refund"
+        }
     else:
-        raise HTTPException(status_code=404, detail="Failed to add tokens")
-    
-    db.commit()
-    
-    return {
-        "status": "Tokens successfully bought"
-    }
+        raise HTTPException(status_code=400, detail="Inactive subscription")
 
 @app.patch("/api/v1/owners/update-settings")
 async def update_settings(
@@ -600,7 +643,7 @@ async def update_settings(
     db: Session = Depends(get_db)
 ):
 
-    owner = db.query(Owner).filter(Owner.id == request.id).first()
+    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
@@ -793,7 +836,7 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions", response_model=SubmissionResponse) # PRIVATE - KEY
+@app.post("/api/v1/submissions", response_model=Union[SubmissionResponse, SubmissionHookResponse]) # PRIVATE - KEY
 async def create_submission(
     submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
@@ -869,6 +912,20 @@ async def create_submission(
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
             submission.meets_requirements = True
+            data = {
+                "owner_id": owner.id,
+                "submission_id": submission.id,
+                "ai_score": ai_res["score"],
+                "plag_score": plag_res["score"],
+                "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
+            }
+            
+            watermark = create_watermark(db, data)
+            
+            return SubmissionHookResponse(
+                watermark_id=watermark.id,
+                temp_text=submission.temp_text
+            )
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
@@ -990,6 +1047,20 @@ async def upload_submission(
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
             submission.meets_requirements = True
+            data = {
+                "owner_id": owner.id,
+                "submission_id": submission.id,
+                "ai_res": ai_res["score"],
+                "plag_res": plag_res["score"],
+                "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
+            }
+            
+            watermark = await create_watermark(db, data)
+            
+            return SubmissionHookResponse(
+                watermark_id=watermark.id,
+                temp_text=submission.temp_text
+            )
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
@@ -1153,14 +1224,21 @@ async def edit_submission(
     
     return
 
-# -- CREATE WATERMARK
-@app.post("/api/v1/watermarks")  # PRIVATE - KEY/LOGIN
-async def create_watermark(
-    request: Request,
-    api_key: str = Depends(get_api_key_from_header),
-    db: Session = Depends(get_db)
-):
-    pass
+def create_watermark(db, req=WatermarkCreate):
+    
+    watermark = Watermark(
+        owner_id=req["owner_id"],
+        submission_id=req["submission_id"],
+        ai_score=req["ai_score"],
+        plag_score=req["plag_score"],
+        citations=req["citations"]
+    )
+    
+    db.add(watermark)
+    db.commit()
+    db.refresh(watermark)
+    
+    return watermark
 
 # -- GET WATERMARKS
 
@@ -1169,7 +1247,6 @@ async def create_watermark(
 
 # ---------- LOG IN ENDPOINTS ----------
 
-# LOG IN
 @app.post("/api/v1/auth/login")
 async def login(
     login_data: LoginRequest,
@@ -1186,6 +1263,156 @@ async def login(
         "id": owner.id
     }
     
+
+# ---------- PAYMENT ENDPOINTS/WEBHOOKS ----------
+@app.post("/api/v1/payments/create-payment-session")
+async def createPaymentSession(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    data = await request.json()
+    owner_id = data.get("owner_id")
+    price_id = data.get("price_id")
+    success_url = data.get("success_url")
+    purchase_type = data.get("purchase_type")
+    name = data.get("name")
+    
+    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+
+    if not price_id or not success_url:
+        raise HTTPException(status_code=400, detail="Missing price_id or success_url")
+    
+    if purchase_type == 'payment' and not owner.is_verified:
+        raise HTTPException(status_code=400, detail="Owner must be verified")
+
+    # For subscriptions, calculate prorated amount if upgrading
+    if purchase_type == 'subscription' and owner.subscription_id:
+        subscription = stripe.Subscription.retrieve(
+            id=owner.subscription_id,
+            api_key=os.getenv("STRIPE_KEY")
+        )
+        subscription_item_id = subscription["items"]["data"][0]["id"]
+
+        updated_subscription = stripe.Subscription.modify(
+            id=owner.subscription_id,
+            api_key=os.getenv("STRIPE_KEY"),
+            items=[{
+                'id': subscription_item_id,
+                'price': price_id
+            }],
+            proration_behavior='create_prorations'
+        )
+
+        # Check if the subscription was updated successfully
+        if updated_subscription and updated_subscription.get("status") in ["active", "trialing"]:
+            owner.change_plan(name)
+            db.commit()
+
+            return {
+                "message": "Successfully updated plan"
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update subscription")
+
+    session = stripe.checkout.Session.create(
+        api_key=os.getenv("STRIPE_KEY"),
+        success_url=success_url,
+        mode=purchase_type,
+        line_items=[{
+            'price': price_id,
+            'quantity': 1
+        }],
+        customer=owner.customer_id if owner.customer_id else None
+    )
+    print(session)
+
+    if session:
+        # Create payment record
+        payment = Payment(
+            owner_id=owner.id,
+            session_id=session.id,
+            customer_id=owner.customer_id,
+            status=session.status,
+            purchase_type=purchase_type,
+            name=name,
+            value=session.amount_total
+        )
+        
+        db.add(payment)
+        db.commit()
+        db.refresh(payment)
+        
+        if not owner.session_ids:
+            owner.session_ids = [session.id]
+        else:
+            owner.session_ids = list(owner.session_ids) + [session.id]
+        
+        db.commit()
+
+        return { "sessionUrl": session.url }
+    else:
+        raise HTTPException(status_code=400, detail="Failed to create payment session")
+
+@app.post("/api/v1/webhooks/payment-webhook")
+async def paymentListener(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    data = await request.json()
+    event_type = data.get("type")
+
+    payment_data = data.get("data")
+    payment_obj = payment_data.get("object") if payment_data else None
+    customer_id = payment_obj.get("customer") if payment_obj else None
+    sub_id = payment_obj.get("subscription") if payment_obj else None
+    status = payment_obj.get("status") if payment_obj else None
+    
+    payment = db.query(Payment).filter(Payment.customer_id == customer_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    # -- CHECKOUT COMPLETED WEBHOOK
+    if event_type == "checkout.session.completed":
+        session_id = payment_obj.get("id") if payment_obj else None
+        payment.status = status
+        
+        owner = db.query(Owner).filter(Owner.id == payment.owner_id).first()
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner not found")
+        owner.customer_id = customer_id
+        
+        if payment.purchase_type == "subscription":
+            owner.verify_owner(False)
+            owner.change_plan(payment.name)
+            owner.subscription_id = sub_id
+            payment.subscription_id = sub_id
+        elif payment.purchase_type == "payment":
+            added_tokens = owner.add_tokens(payment.name)
+            if added_tokens != None:
+                owner.current_tokens = added_tokens["tokens"]
+                
+        db.commit()
+        return
+            
+    # -- CHARGE SUCCEEDED WEBHOOK
+    if event_type == "charge.succeeded":
+        charge_id = payment_obj.get("id") if payment_obj else None
+        payment_intent = payment_obj.get("payment_intent") if payment_obj else None
+        payment.payment_intent = payment_intent
+        
+        db.commit()
+        return
+            
+    # -- INVOICE GENERATED WEBHOOK
+    if event_type == "invoice.payment_succeeded":
+        invoice_id = payment_obj.get("id") if payment_obj else None
+        payment.invoice_id = invoice_id
+        
+        db.commit()
+        return
+
     
 if __name__ == "__main__":
     import uvicorn
