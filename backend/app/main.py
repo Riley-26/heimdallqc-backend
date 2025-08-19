@@ -603,7 +603,7 @@ async def cancel_plan(
         else:
             raise HTTPException(status_code=400, detail="Failed to cancel subscription")
         
-        # Calculate refund from latest invoice only, ignores prorates
+        # Calculate refund from latest invoice only, ignores upgrade/downgrade prorates on next invoice
         if payment.payment_intent:
             latest_invoice = stripe.Invoice.retrieve(
                 subscription.latest_invoice,
@@ -617,7 +617,9 @@ async def cancel_plan(
             total_period = period_end - period_start
             used_period = current_time - period_start
             
-            refund_amount = max(0, math.floor(int(latest_invoice.amount_paid * (1 - (used_period / total_period)))/100)*100)
+            # Based on prorate from last payment, minus the stripe processing fees
+            refund_amount = max(0, (math.floor(int(latest_invoice.amount_paid * (1 - (used_period / total_period)))/100)*100)*0.97-0.20)
+            print(refund_amount)
             
             refund = stripe.Refund.create(
                 payment_intent=payment.payment_intent,
@@ -632,7 +634,7 @@ async def cancel_plan(
                 }
 
         return {
-            "message": "Unable to create refund"
+            "message": "Cancelled plan, but unable to create refund"
         }
     else:
         raise HTTPException(status_code=400, detail="Inactive subscription")
