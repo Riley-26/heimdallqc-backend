@@ -12,18 +12,22 @@ class Payment(Base):
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
     
     # IDs
-    session_id = Column(String, nullable=False)
+    session_id = Column(String, nullable=True)
     subscription_id = Column(String, nullable=True)
-    customer_id = Column(String, nullable=False)
-    payment_intent = Column(String, nullable=True)
+    payment_intent_id = Column(String, nullable=True)
     invoice_id = Column(String, nullable=True)
+    price_id = Column(String, nullable=True)
+    payment_method_id = Column(String, nullable=True)
+    invoice_pdf = Column(String, nullable=True)
     
     # Details
     status = Column(String, nullable=False)
-    purchase_type = Column(String, nullable=False)
+    payment_type = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    value = Column(Integer, nullable=False)
+    amount = Column(Integer, nullable=False)
+    currency = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    desc = Column(String, nullable=True)
     
     owner = relationship("Owner", back_populates="payments")
     

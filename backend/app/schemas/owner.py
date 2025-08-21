@@ -62,6 +62,7 @@ class PlanUpdate(BaseModel):
 class PlanCancel(BaseModel):
     """Cancel plan"""
     owner_id: int
+    immediate: bool
 
 class TokenPurchase(BaseModel):
     """Purchase additional tokens"""
@@ -69,6 +70,7 @@ class TokenPurchase(BaseModel):
     pack_name: str = Field(..., pattern='^(sm|md|lg|xl)$')
     
 class OwnerJwt(BaseModel):
+    """JWT request schema"""
     name: Optional[str] = None
     email: str
     sub: Optional[str] = None
@@ -98,6 +100,7 @@ class OwnerResponse(OwnerBase):
     tokens_used: int
     watermarks_made: int
     plagiarisms_prevented: int
+    entries_needing_action: int
 
 class OwnerDetailResponse(OwnerResponse):
     """Detailed owner response with preferences"""
@@ -110,4 +113,6 @@ class OwnerDetailResponse(OwnerResponse):
     created_at: datetime
     updated_at: datetime
     verified_at: Optional[datetime] = None
-    
+    customer_id: str
+    subscription_id: str
+    session_ids: list

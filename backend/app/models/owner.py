@@ -89,13 +89,14 @@ class Owner(Base):
         "widget": True,
         "watermarks": True
     })
-    ai_threshold_option = Column(Integer, nullable=False, default=40)
+    ai_threshold_option = Column(Integer, nullable=False, default=60)
     
     # Usage tracking
     current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)
     tokens_used = Column(Integer, default=0, nullable=False)
     watermarks_made = Column(Integer, default=0, nullable=False)
     plagiarisms_prevented = Column(Integer, default=0, nullable=False)
+    entries_needing_action = Column(Integer, default=0, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -111,17 +112,25 @@ class Owner(Base):
     def __repr__(self):
         return f"<Owner(id={self.id}, email={self.email})>"
     
-    def change_plan(self, new_plan):
+    def change_plan(self, new_plan_id):
         tokens = self.current_tokens
 
-        if new_plan in plans_dict.keys():
+        # Find the plan where the "id" matches new_plan_id
+        matched_plan = None
+        for plan_name, plan_info in plans_dict.items():
+            if plan_info["id"] == new_plan_id:
+                matched_plan = plan_name
+                break
+        print(matched_plan)
+        if matched_plan:
             # Only increase tokens if tokens are short
-            if self.current_tokens < plans_dict[new_plan]["tokens"]:
-                tokens = plans_dict[new_plan]["tokens"]
-            self.plan = plans_dict[new_plan]
-            
+            if self.current_tokens < plans_dict[matched_plan]["tokens"]:
+                tokens = plans_dict[matched_plan]["tokens"]
+                
+            self.plan = plans_dict[matched_plan]
+
             return {
-                "plan": plans_dict[new_plan],
+                "plan": matched_plan,
                 "tokens": tokens
             }
         else:

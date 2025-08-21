@@ -1,6 +1,6 @@
 import math
 import secrets
-from typing import List, Union
+from typing import List, Optional, Union
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -33,9 +33,10 @@ from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.watermark import WatermarkCreate
-from .schemas.payment import PaymentCreate, PaymentListResponse
+from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionCancel, SubscriptionUpdate
 
 MARKUP_FACTOR = 15
+stripe.api_key = os.getenv("STRIPE_KEY")
 
 # Create FastAPI application
 app = FastAPI(
@@ -216,6 +217,42 @@ async def process_submission_background(submission_id: int):
         print(f"Background processing error for submission {submission_id}: {e}")
     finally:
         db.close()
+
+async def get_current_owner(
+    db: Session,
+    owner_id: int = None,
+    customer_id: str = None
+):
+    """Returns owner based on either owner_id or owner's customer_id. One must be provided."""
+    if not owner_id and not customer_id:
+        raise HTTPException(status_code=400, detail="Either owner_id or customer_id must be provided")
+    if owner_id:
+        owner = db.query(Owner).filter(Owner.id == owner_id).first()
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner not found")
+    else:
+        owner = db.query(Owner).filter(Owner.customer_id == customer_id).first()
+        if not owner:
+            raise HTTPException(status_code=404, detail="Owner not found")
+    return owner
+
+async def get_payment(
+    db: Session,
+    owner_id: int = None,
+    subscription_id: str = None
+):
+    """Returns payment item identified using subscription_id"""
+    if not owner_id and not subscription_id:
+        raise HTTPException(status_code=400, detail="Either owner_id or subscription_id must be provided")
+    if owner_id:
+        payment = db.query(Payment).filter(Payment.owner_id == owner_id).first()
+        if not payment:
+            raise HTTPException(status_code=400, detail="Payment item not found")
+    else:
+        payment = db.query(Payment).filter(Payment.subscription_id == subscription_id).first()
+        if not payment:
+            raise HTTPException(status_code=400, detail="Payment item not found")
+    return payment
 
 
 # ---------- ANALYSIS FUNCTIONS ----------
@@ -470,11 +507,11 @@ async def confirm_jwt(
         Owner.email == token.email
     ).first()
     if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
+        raise HTTPException(status_code=404, detail="JWT invalid")
     
     return True
 
-@app.get("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PUBLIC
+@app.post("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -482,9 +519,7 @@ async def get_owner(
     """
     Get owner by ID.
     """
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
+    owner = await get_current_owner(db, owner_id=owner_id)
     
     return OwnerResponse(
         id=owner.id,
@@ -497,7 +532,8 @@ async def get_owner(
         current_tokens=owner.current_tokens,
         tokens_used=owner.tokens_used,
         watermarks_made=owner.watermarks_made,
-        plagiarisms_prevented=owner.plagiarisms_prevented
+        plagiarisms_prevented=owner.plagiarisms_prevented,
+        entries_needing_action=owner.entries_needing_action
     )
     
 @app.post("/api/v1/owners/{owner_id}/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
@@ -508,9 +544,7 @@ async def get_owner_details(
     """
     Get owner by ID.
     """
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
+    owner = await get_current_owner(db, owner_id=owner_id)
     
     return OwnerDetailResponse(
         id=owner.id,
@@ -524,6 +558,7 @@ async def get_owner_details(
         tokens_used=owner.tokens_used,
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
+        entries_needing_action=owner.entries_needing_action,
         domain_id=owner.domain_id,
         verified_month_end=owner.verified_month_end,
         plan=owner.plan,
@@ -532,113 +567,159 @@ async def get_owner_details(
         ai_threshold_option=owner.ai_threshold_option,
         created_at=owner.created_at,
         updated_at=owner.updated_at,
-        verified_at=owner.verified_at
+        verified_at=owner.verified_at,
+        customer_id=owner.customer_id,
+        subscription_id=owner.subscription_id,
+        session_ids=owner.session_ids
     )
 
 # -- DEACTIVATE/DELETE OWNER
 
 # -- GET PLAN USAGE
 
-@app.post("/api/v1/owners/{owner_id}/invoices", response_model=List[PaymentListResponse])
+@app.post("/api/v1/owners/{owner_id}/invoices", response_model=Union[List[PaymentListResponse], None])
 async def get_owner_invoices(
     owner_id: int,
     db: Session = Depends(get_db)
 ):
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    
-    payments = db.query(Payment).filter(Payment.owner_id == owner_id).all()
-    if not payments:
-        raise HTTPException(status_code=404, detail="Payments not found")
-    
-    return [
-        PaymentListResponse(
-            owner_id=payment.owner_id,
-            status=payment.status,
-            name=payment.name,
-            purchase_type=payment.purchase_type,
-            invoice_id=payment.invoice_id,
-            value=payment.value,
-            created_at=payment.created_at
+    """Return list of owner's invoices for display"""
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        if not owner.customer_id:
+            return None
+
+        invoices = stripe.Invoice.list(
+            customer=owner.customer_id
         )
-        for payment in payments if payments
-    ]
+        
+        return [
+            PaymentListResponse(
+                amount=invoice.amount,
+                status=invoice.status,
+                created_at=invoice.created,
+                pdf_link=invoice.invoice_pdf
+            )
+            for invoice in invoices.data if invoices.data
+        ]
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to retrieve invoices"
+        )
     
-@app.patch("/api/v1/owners/cancel-plan")
+@app.patch("/api/v1/owners/update-plan")
+async def change_plan(
+    request: SubscriptionUpdate,
+    db: Session = Depends(get_db),
+):
+    """Upgrade/Downgrade owner's plan, calculate proration accordingly"""
+    try:
+        owner = await get_current_owner(db, owner_id=request.owner_id)
+        
+        subscription = stripe.Subscription.retrieve(owner.subscription_id)
+        
+        if subscription.customer != owner.customer_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Unauthorised attempt"
+            )
+        
+        # Update subscription item first
+        updated_subscription = stripe.Subscription.modify(
+            owner.subscription_id,
+            items=[{
+                'id': subscription['items']['data'][0]['id'],
+                'price': request.new_plan_id
+            }],
+            proration_behavior='create_prorations' if request.prorate else 'none'
+        )
+        if not updated_subscription:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to update subscription"
+            )
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to change subscription"
+        )
+    else:
+        # Then update in database if no errors
+        owner.change_plan(request.new_plan_id)
+        owner.verify_owner(cancelled=False)
+        db.commit()
+        return
+        
+@app.put("/api/v1/owners/cancel-plan")
 async def cancel_plan(
-    request: PlanCancel,
+    request: SubscriptionCancel,
     db: Session = Depends(get_db)
 ):  
-    """Cancel owners plan, providing a refund of the unused amount. Must have an active subscription."""
-    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    if not owner.is_verified or not owner.subscription_id:
-        raise HTTPException(status_code=400, detail="Unable to cancel")
-    
-    payment = db.query(Payment).filter(Payment.subscription_id == owner.subscription_id).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    
-    subscription = stripe.Subscription.retrieve(
-        owner.subscription_id,
-        api_key=os.getenv("STRIPE_KEY")
-    )
-    
-    if subscription and subscription.status == 'active':
-        # Cancel plan first
-        canceled_subscription = stripe.Subscription.delete(
-            owner.subscription_id,
-            api_key=os.getenv("STRIPE_KEY"),
-            invoice_now=True,
-            prorate=True
-        )
+    """Cancel owners subscription, providing a refund of the unused amount. Must have an active subscription."""
+    try:
+        owner = await get_current_owner(db, owner_id=request.owner_id)
         
-        if canceled_subscription:
-            owner.change_plan("None")
-            owner.is_verified = False
-            owner.subscription_id = ''
-            db.commit()
+        subscription = stripe.Subscription.retrieve(owner.subscription_id)
+        
+        if subscription.customer != owner.customer_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Unauthorised attempt"
+            )
+        
+        if request.is_immediate_cancel:
+            # Create refund for prorated amount
+            cancelled_sub = stripe.Subscription.cancel(
+                owner.subscription_id
+            )
+            
+            latest_invoice = stripe.Invoice.list(
+                customer=owner.customer,
+                subscription=owner.subscription_id,
+                limit=1
+            ).data[0]
+            
+            if latest_invoice.status == "paid":
+                # Calculate prorated amount
+                now = datetime.now().timestamp()
+                period_start = subscription.items.data[0].current_period_start
+                period_end = subscription.items.data[0].current_period_end
+                
+                if now < period_end:
+                    processing_fee = 0.95
+                    unused_time = period_end - now
+                    total_time = period_end - period_start
+                    refund_ratio = unused_time / total_time
+                    refund_amount = int(latest_invoice.amount_paid * refund_ratio * processing_fee)
+                    
+                    payment = await get_payment(subscription_id=owner.subscription_id)
+                    
+                    # Create refund
+                    stripe.Refund.create(
+                        payment_intent=payment.payment_intent_id,
+                        amount=refund_amount,
+                        reason="requested_by_customer"
+                    )
+            
+            message = "Subscription cancelled immediately"
         else:
-            raise HTTPException(status_code=400, detail="Failed to cancel subscription")
+            # Cancel at period end
+            stripe.Subscription.modify(
+                owner.subscription_id,
+                cancel_at_period_end=True
+            )
+            message = "Subscription will cancel at the end of the current plan"
         
-        # Calculate refund from latest invoice only, ignores upgrade/downgrade prorates on next invoice
-        if payment.payment_intent:
-            latest_invoice = stripe.Invoice.retrieve(
-                subscription.latest_invoice,
-                api_key=os.getenv("STRIPE_KEY")
-            )
-            
-            sub_data = subscription["items"]["data"][0]
-            current_time = datetime.now().timestamp()
-            period_start = sub_data["current_period_start"]
-            period_end = sub_data["current_period_end"]
-            total_period = period_end - period_start
-            used_period = current_time - period_start
-            
-            # Based on prorate from last payment, minus the stripe processing fees
-            refund_amount = max(0, (math.floor(int(latest_invoice.amount_paid * (1 - (used_period / total_period)))/100)*100)*0.97-0.20)
-            print(refund_amount)
-            
-            refund = stripe.Refund.create(
-                payment_intent=payment.payment_intent,
-                amount=refund_amount,
-                api_key=os.getenv("STRIPE_KEY")
-            )
-            
-            if refund:
-                payment.status = 'refunded'
-                return {
-                    "message": "Successfully cancelled subscription and refund processed"
-                }
-
         return {
-            "message": "Cancelled plan, but unable to create refund"
+            "message": message
         }
-    else:
-        raise HTTPException(status_code=400, detail="Inactive subscription")
-
+    
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to cancel subscription"
+        )
+    
 @app.patch("/api/v1/owners/update-settings")
 async def update_settings(
     request: SettingsUpdate,
@@ -711,6 +792,73 @@ async def reset_password(
     
     return
 
+@app.post("/api/v1/owners/{owner_id}/payment-methods", response_model=Union[List[PaymentMethodListResponse], None])
+async def get_payment_methods(
+    owner_id: int,
+    db: Session = Depends(get_db)
+):
+    """Returns list of owner's payment methods"""
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        if not owner.customer_id:
+            return None
+        
+        # Retrieve owner's payment methods from Stripe
+        payment_methods = stripe.PaymentMethod.list(
+            customer=owner.customer_id,
+            type='card'
+        )
+        
+        method_items = []
+        for pm in payment_methods.data:
+            method_items.append(PaymentMethodListResponse(
+                payment_method_id=pm.id,
+                payment_method_type=pm.type,
+                card=pm.card if pm.type == "card" else None,
+                created_at=datetime.fromtimestamp(pm.created)
+            ))
+        
+        return method_items
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to retrieve payment methods"
+        )
+        
+@app.delete("/api/v1/owners/{owner_id}/delete-payment-method", response_model=dict)
+async def delete_payment_method(
+    request: PaymentMethodDelete,
+    db: Session = Depends(get_db)
+):
+    """Delete a saved payment method"""
+    try:
+        owner = await get_current_owner(db, request.owner_id)
+        
+        payment_method = stripe.PaymentMethod.retrieve(
+            request.payment_method_id
+        )
+        
+        if payment_method.customer != owner.customer_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Unauthorised attempt"
+            )
+            
+        # Delete payment method
+        stripe.PaymentMethod.detach(
+            request.payment_method_id
+        )
+        
+        return {
+            "success": True,
+            "message": "Payment method deleted successfully"
+        }
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to delete payment method"
+        )
+        
 
 # ---------- SITE ENDPOINTS ----------
 
@@ -914,6 +1062,7 @@ async def create_submission(
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
             submission.meets_requirements = True
+            owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
             data = {
                 "owner_id": owner.id,
                 "submission_id": submission.id,
@@ -922,7 +1071,7 @@ async def create_submission(
                 "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
             }
             
-            watermark = create_watermark(db, data)
+            watermark = _create_watermark(db, data)
             
             return SubmissionHookResponse(
                 watermark_id=watermark.id,
@@ -1057,7 +1206,7 @@ async def upload_submission(
                 "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
             }
             
-            watermark = await create_watermark(db, data)
+            watermark = await _create_watermark(db, data)
             
             return SubmissionHookResponse(
                 watermark_id=watermark.id,
@@ -1226,7 +1375,7 @@ async def edit_submission(
     
     return
 
-def create_watermark(db, req=WatermarkCreate):
+def _create_watermark(db, req=WatermarkCreate):
     
     watermark = Watermark(
         owner_id=req["owner_id"],
@@ -1266,154 +1415,239 @@ async def login(
     }
     
 
-# ---------- PAYMENT ENDPOINTS/WEBHOOKS ----------
-@app.post("/api/v1/payments/create-payment-session")
-async def createPaymentSession(
-    request: Request,
+# ---------- STRIPE ENDPOINTS/WEBHOOKS/HELPERS ----------
+
+# -- HELPERS
+
+async def _ensure_stripe_customer(db, owner):
+    """Ensure owner is a Stripe customer, create if not"""
+    if owner.customer_id:
+        confirmed = stripe.Customer.retrieve(
+            owner.customer_id
+        )
+        if confirmed:
+            return owner.customer_id
+    
+    try:
+        # Create Stripe customer
+        customer = stripe.Customer.create(
+            email=owner.email,
+            name=owner.name
+        )
+        
+        # Save to db
+        await _update_owner_stripe_customer_id(db, owner.id, customer.id)
+        
+        return customer.id
+    except stripe.error.StripeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create customer"
+        )
+        
+async def _update_owner_stripe_customer_id(
+    db: Session,
+    owner_id: int,
+    customer_id: str
+):
+    """Updates owner's Stripe customer ID in database"""
+    owner = await get_current_owner(db, owner_id=owner_id)
+    owner.customer_id = customer_id
+    
+    db.commit()
+    return
+
+# -- ENDPOINTS
+
+@app.post("/api/v1/payments/create-payment-session", response_model=dict)
+async def create_payment_session(
+    request: PaymentCreate,
     db: Session = Depends(get_db)
 ):
-    data = await request.json()
-    owner_id = data.get("owner_id")
-    price_id = data.get("price_id")
-    success_url = data.get("success_url")
-    purchase_type = data.get("purchase_type")
-    name = data.get("name")
-    
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-
-    if not price_id or not success_url:
-        raise HTTPException(status_code=400, detail="Missing price_id or success_url")
-    
-    if purchase_type == 'payment' and not owner.is_verified:
-        raise HTTPException(status_code=400, detail="Owner must be verified")
-
-    # For subscriptions, calculate prorated amount if upgrading
-    if purchase_type == 'subscription' and owner.subscription_id:
-        subscription = stripe.Subscription.retrieve(
-            id=owner.subscription_id,
-            api_key=os.getenv("STRIPE_KEY")
-        )
-        subscription_item_id = subscription["items"]["data"][0]["id"]
-
-        updated_subscription = stripe.Subscription.modify(
-            id=owner.subscription_id,
-            api_key=os.getenv("STRIPE_KEY"),
-            items=[{
-                'id': subscription_item_id,
-                'price': price_id
-            }],
-            proration_behavior='create_prorations'
-        )
-
-        # Check if the subscription was updated successfully
-        if updated_subscription and updated_subscription.get("status") in ["active", "trialing"]:
-            owner.change_plan(name)
-            db.commit()
-
-            return {
-                "message": "Successfully updated plan"
-            }
+    """Create a payment (subscription or one_off), creates Stripe customer if needed"""
+    try:
+        owner = await get_current_owner(db, owner_id=request.owner_id)
+        customer_id = await _ensure_stripe_customer(db, owner)
+        
+        success_url = request.success_url or "http://localhost:3000/account/api-management"
+        
+        checkout_params = {
+            "customer": customer_id,
+            "payment_method_types": ["card"],
+            "success_url": success_url,
+            "metadata": {"owner_id": str(owner.id)},
+            "customer_update": {
+                "address": "auto",
+                "name": "auto"
+            },
+            "payment_method_collection": "always"
+        }
+        
+        if request.payment_type == "subscription":
+            try:
+                price = stripe.Price.retrieve(request.price_id)
+                if price.type != "recurring":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Price ID must be for recurring payments"
+                    )
+            except stripe.error.InvalidRequestError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid price ID"
+                )
+            
+            checkout_params.update({
+                "mode": "subscription",
+                "line_items": [
+                    {
+                        "price": request.price_id,
+                        "quantity": 1
+                    }
+                ],
+                "subscription_data": {
+                    "metadata": {"owner_id": str(owner.id)}
+                }
+            })
         else:
-            raise HTTPException(status_code=400, detail="Failed to update subscription")
-
-    session = stripe.checkout.Session.create(
-        api_key=os.getenv("STRIPE_KEY"),
-        success_url=success_url,
-        mode=purchase_type,
-        line_items=[{
-            'price': price_id,
-            'quantity': 1
-        }],
-        customer=owner.customer_id if owner.customer_id else None
-    )
-    print(session)
-
-    if session:
-        # Create payment record
+            if not request.price_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No price_id provided"
+                )
+                
+            try:
+                price = stripe.Price.retrieve(request.price_id)
+                if price.type != "one_off":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Price ID must be for one-off payments"
+                    )
+            except stripe.error.InvalidRequestError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid price ID"
+                )
+                
+            checkout_params.update({
+                "mode": "payment",
+                "line_items": [
+                    {
+                        "price": request.price_id,
+                        "quantity": 1,
+                    }
+                ],
+                "payment_intent_data": {
+                    "metadata": {"owner_id": str(owner.id)}
+                }
+            })
+            
+        session = stripe.checkout.Session.create(**checkout_params)
+        
         payment = Payment(
             owner_id=owner.id,
-            session_id=session.id,
-            customer_id=owner.customer_id,
             status=session.status,
-            purchase_type=purchase_type,
-            name=name,
-            value=session.amount_total
+            currency="gbp",
+            price_id=request.price_id,
+            amount=session.amount_total,
+            payment_type=request.payment_type,
+            name=request.name
         )
         
         db.add(payment)
         db.commit()
-        db.refresh(payment)
         
-        if not owner.session_ids:
-            owner.session_ids = [session.id]
-        else:
-            owner.session_ids = list(owner.session_ids) + [session.id]
+        return {
+            "session_url": session.url
+        }
+    
+    except stripe.error.StripeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to create checkout session"
+        )
+    except Exception as e:
+        print(e)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred"
+        )
         
-        db.commit()
+# -- WEBHOOKS
 
-        return { "sessionUrl": session.url }
-    else:
-        raise HTTPException(status_code=400, detail="Failed to create payment session")
-
-@app.post("/api/v1/webhooks/payment-webhook")
-async def paymentListener(
+@app.post("/api/v1/webhooks/stripe-webhooks")
+async def stripe_listener(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    # Generic data
     data = await request.json()
     event_type = data.get("type")
-
-    payment_data = data.get("data")
-    payment_obj = payment_data.get("object") if payment_data else None
-    customer_id = payment_obj.get("customer") if payment_obj else None
-    sub_id = payment_obj.get("subscription") if payment_obj else None
-    status = payment_obj.get("status") if payment_obj else None
+    response_data = data.get("data")
+    response_obj = response_data.get("object") if response_data else None
+    customer_id = response_obj.get("customer") if response_obj else None
     
-    payment = db.query(Payment).filter(Payment.customer_id == customer_id).first()
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
+    owner = await get_current_owner(db, customer_id=customer_id)
+    payment = await get_payment(db, owner_id=owner.id)
     
-    # -- CHECKOUT COMPLETED WEBHOOK
+    # -- CHECKOUT-COMPLETED WEBHOOK
     if event_type == "checkout.session.completed":
-        session_id = payment_obj.get("id") if payment_obj else None
-        payment.status = status
+        # Change owner's plan accordingly
+        session_id = response_obj.get("id") if response_obj else None
+        subscription_id = response_obj.get("subscription") if response_obj else None
+        status = response_obj.get("status") if response_obj else None
+        if not owner.session_ids:
+            owner.session_ids = [session_id]
+        else:
+            owner.session_ids = list(owner.session_ids) + [session_id]
         
-        owner = db.query(Owner).filter(Owner.id == payment.owner_id).first()
-        if not owner:
-            raise HTTPException(status_code=404, detail="Owner not found")
-        owner.customer_id = customer_id
-        
-        if payment.purchase_type == "subscription":
-            owner.verify_owner(False)
-            owner.change_plan(payment.name)
-            owner.subscription_id = sub_id
-            payment.subscription_id = sub_id
-        elif payment.purchase_type == "payment":
-            added_tokens = owner.add_tokens(payment.name)
-            if added_tokens != None:
-                owner.current_tokens = added_tokens["tokens"]
-                
-        db.commit()
-        return
+        if subscription_id:
+            payment.subscription_id = subscription_id
+            owner.subscription_id = subscription_id
+        if status:
+            payment.status = status
+        if session_id:
+            payment.session_id = session_id
             
-    # -- CHARGE SUCCEEDED WEBHOOK
+    # -- CHARGE-SUCCEEDED WEBHOOK
     if event_type == "charge.succeeded":
-        charge_id = payment_obj.get("id") if payment_obj else None
-        payment_intent = payment_obj.get("payment_intent") if payment_obj else None
-        payment.payment_intent = payment_intent
-        
-        db.commit()
-        return
+        # Store payment intent upon successful payment
+        payment_intent = response_obj.get("payment_intent") if response_obj else None
+        payment_method = response_obj.get("payment_method") if response_obj else None
+        if payment_intent:
+            payment.payment_intent_id = payment_intent
+        if payment_method:
+            payment.payment_method_id = payment_method
             
-    # -- INVOICE GENERATED WEBHOOK
+    # -- INVOICE-GENERATED WEBHOOK
     if event_type == "invoice.payment_succeeded":
-        invoice_id = payment_obj.get("id") if payment_obj else None
-        payment.invoice_id = invoice_id
-        
-        db.commit()
-        return
+        # Store invoice when payment succeeded
+        invoice_id = response_obj.get("id") if response_obj else None
+        invoice_pdf = response_obj.get("invoice_pdf") if response_obj else None
+        price_id = response_obj["lines"]["data"][0]["pricing"]["price_details"]["price"]
+        if invoice_id:
+            payment.invoice_id = invoice_id
+        if invoice_pdf:
+            payment.invoice_pdf = invoice_pdf
+        if price_id:
+            payment.price_id = price_id
+            
+        owner.change_plan(price_id)
+        owner.verify_owner(False)
+    
+    # -- INVOICE-FAILED WEBHOOK
+    if event_type == "invoice.payment_failed":
+        print(data)
+    
+    # -- SUBSCRIPTION-CANCELLED WEBHOOK
+    if event_type == "customer.subscription.deleted":
+        print(data)
+    
+    db.commit()
+    db.refresh(payment)
+    db.refresh(owner)
+    
+    return
 
     
 if __name__ == "__main__":
