@@ -11,13 +11,16 @@ class Payment(Base):
     # Foreign key
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
     
+    # Unique metadata ID
+    unique_id = Column(String, nullable=False)
+    
     # IDs
+    customer_id = Column(String, nullable=True)
+    event_id = Column(String, nullable=True)
     session_id = Column(String, nullable=True)
     subscription_id = Column(String, nullable=True)
-    payment_intent_id = Column(String, nullable=True)
     invoice_id = Column(String, nullable=True)
     price_id = Column(String, nullable=True)
-    payment_method_id = Column(String, nullable=True)
     invoice_pdf = Column(String, nullable=True)
     
     # Details

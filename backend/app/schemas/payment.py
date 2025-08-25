@@ -13,7 +13,6 @@ class PaymentCreate(BaseModel):
     name: str
     amount: int = Field(None, description="Amount in pence (for one-off payments)")
     currency: str = Field(default="gbp")
-    payment_method_id: str = Field(None, description="Stripe payment method ID")
     description: Optional[str] = None
     
 # -- INPUT MODELS
@@ -22,13 +21,12 @@ class PaymentUpdate(BaseModel):
     """Updates the payment using Stripe webhooks"""
     session_id: Optional[str] = None
     subscription_id: Optional[str] = None
-    payment_intent_id: Optional[str] = None
     invoice_id: Optional[str] = None
     
 class SubscriptionUpdate(BaseModel):
     """Updates subscription payment"""
-    subscription_id: str
-    new_price_id: str
+    owner_id: int
+    new_plan_id: str
     prorate: bool = Field(default=True)
     
 class SubscriptionCancel(BaseModel):
@@ -54,12 +52,11 @@ class PaymentDetailResponse(PaymentResponse):
     """Detailed payment response"""
     amount: str
     created_at: datetime
-    pdf_url: Optional[str]
+    event_id: Optional[str] = None
+    pdf_url: Optional[str] = None
     session_id: Optional[str] = None
     subscription_id: Optional[str] = None
-    payment_intent_id: Optional[str] = None
     invoice_id: Optional[str] = None
-    payment_method_id: Optional[str] = None
     price_id: Optional[str] = None
 
 class PaymentListResponse(BaseModel):
@@ -67,7 +64,7 @@ class PaymentListResponse(BaseModel):
     amount: int
     status: str
     created_at: datetime
-    pdf_url: Optional[str]
+    pdf_link: Optional[str] = None
     
 class PaymentMethodListResponse(BaseModel):
     """Payment methods listed response"""

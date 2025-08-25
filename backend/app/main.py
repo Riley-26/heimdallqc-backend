@@ -1,6 +1,7 @@
 import math
 import secrets
 from typing import List, Optional, Union
+import uuid
 from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +29,7 @@ from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
 from .models.watermark import Watermark
 from .models.payment import Payment
+from .models.event import Event
 from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
@@ -35,7 +37,10 @@ from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionHookRe
 from .schemas.watermark import WatermarkCreate
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionCancel, SubscriptionUpdate
 
+# !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
+# !!!!
+
 stripe.api_key = os.getenv("STRIPE_KEY")
 
 # Create FastAPI application
@@ -238,6 +243,7 @@ async def get_current_owner(
 
 async def get_payment(
     db: Session,
+    unique_id: str,
     owner_id: int = None,
     subscription_id: str = None
 ):
@@ -245,7 +251,10 @@ async def get_payment(
     if not owner_id and not subscription_id:
         raise HTTPException(status_code=400, detail="Either owner_id or subscription_id must be provided")
     if owner_id:
-        payment = db.query(Payment).filter(Payment.owner_id == owner_id).first()
+        payment = db.query(Payment).filter(
+            Payment.owner_id == owner_id,
+            Payment.unique_id == unique_id
+        ).first()
         if not payment:
             raise HTTPException(status_code=400, detail="Payment item not found")
     else:
@@ -588,19 +597,23 @@ async def get_owner_invoices(
         if not owner.customer_id:
             return None
 
+        # Subscriptions
         invoices = stripe.Invoice.list(
             customer=owner.customer_id
         )
         
-        return [
+        invoice_list = [
             PaymentListResponse(
-                amount=invoice.amount,
+                amount=invoice.total,
                 status=invoice.status,
                 created_at=invoice.created,
                 pdf_link=invoice.invoice_pdf
             )
-            for invoice in invoices.data if invoices.data
+            for invoice in invoices.data if invoice.status == "paid"
         ]
+        
+        return invoice_list
+    
     except stripe.error.StripeError:
         raise HTTPException(
             status_code=400,
@@ -667,6 +680,9 @@ async def cancel_plan(
                 detail="Unauthorised attempt"
             )
         
+        # -- PRORATE REFUND - FOR FUTURE USE
+        
+        """
         if request.is_immediate_cancel:
             # Create refund for prorated amount
             cancelled_sub = stripe.Subscription.cancel(
@@ -674,7 +690,7 @@ async def cancel_plan(
             )
             
             latest_invoice = stripe.Invoice.list(
-                customer=owner.customer,
+                customer=owner.customer_id,
                 subscription=owner.subscription_id,
                 limit=1
             ).data[0]
@@ -682,8 +698,8 @@ async def cancel_plan(
             if latest_invoice.status == "paid":
                 # Calculate prorated amount
                 now = datetime.now().timestamp()
-                period_start = subscription.items.data[0].current_period_start
-                period_end = subscription.items.data[0].current_period_end
+                period_start = subscription["items"].data[0].current_period_start
+                period_end = subscription["items"].data[0].current_period_end
                 
                 if now < period_end:
                     processing_fee = 0.95
@@ -692,7 +708,7 @@ async def cancel_plan(
                     refund_ratio = unused_time / total_time
                     refund_amount = int(latest_invoice.amount_paid * refund_ratio * processing_fee)
                     
-                    payment = await get_payment(subscription_id=owner.subscription_id)
+                    payment = await get_payment(db=db, owner_id=owner.id, subscription_id=owner.subscription_id)
                     
                     # Create refund
                     stripe.Refund.create(
@@ -702,19 +718,23 @@ async def cancel_plan(
                     )
             
             message = "Subscription cancelled immediately"
-        else:
-            # Cancel at period end
-            stripe.Subscription.modify(
-                owner.subscription_id,
-                cancel_at_period_end=True
-            )
-            message = "Subscription will cancel at the end of the current plan"
+        """
+        
+        # --
+        
+        # Cancel at period end
+        stripe.Subscription.modify(
+            owner.subscription_id,
+            cancel_at_period_end=True
+        )
+        message = "Subscription will cancel at the end of the current plan"
         
         return {
             "message": message
         }
     
-    except stripe.error.StripeError:
+    except stripe.error.StripeError as e:
+        print(e)
         raise HTTPException(
             status_code=400,
             detail="Failed to cancel subscription"
@@ -808,17 +828,16 @@ async def get_payment_methods(
             customer=owner.customer_id,
             type='card'
         )
-        
-        method_items = []
-        for pm in payment_methods.data:
-            method_items.append(PaymentMethodListResponse(
+
+        return [
+            PaymentMethodListResponse(
                 payment_method_id=pm.id,
                 payment_method_type=pm.type,
                 card=pm.card if pm.type == "card" else None,
-                created_at=datetime.fromtimestamp(pm.created)
-            ))
-        
-        return method_items
+                created_at=pm.created
+            )
+            for pm in payment_methods.data
+        ]
     except stripe.error.StripeError:
         raise HTTPException(
             status_code=400,
@@ -1417,8 +1436,281 @@ async def login(
 
 # ---------- STRIPE ENDPOINTS/WEBHOOKS/HELPERS ----------
 
-# -- HELPERS
+# -- WEBHOOK HELPERS
 
+async def _handle_session_completed(db, data):
+    """Handles the checkout.session.completed webhook"""
+    main_data = data.get("data")
+    data_obj = main_data.get("object")
+    owner_id = data_obj.get("metadata").get("owner_id")
+    unique_id = data_obj.get("metadata").get("unique_id")
+
+    # Idempotency check
+    is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"))
+    
+    if is_already_processed:
+        return {
+            "status": "duplicate"
+        }
+    
+    # Fetch database entries
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+    except Exception as e:
+        print("Failed to fetch owner or payment: ", e)
+    
+    # Check "customer_id" exists, create if not
+    try:
+        owner.customer_id = await _ensure_stripe_customer(db, owner)
+        
+        db.commit()
+    except Exception as e:
+        print("Failed to save customer_id: ", e)
+    
+    # Create event - save only when all datapoints are available, no duplicate due to earlier check
+    await _create_event(db, data.get("id"), data.get("type"), owner.customer_id)
+    
+    return {
+        "status": "success"
+    }
+  
+async def _handle_session_expired(db, data):
+    """Handles the checkout.session.expired webhook"""
+    main_data = data.get("data")
+    data_obj = main_data.get("object")
+    owner_id = data_obj.get("metadata").get("owner_id")
+    unique_id = data_obj.get("metadata").get("unique_id")
+    
+    # Fetch database entries
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+    except Exception as e:
+        print("Failed to fetch owner or payment: ", e)
+        
+    # Delete payment record
+    try:
+        db.delete(payment)
+        db.commit()
+    except Exception as e:
+        print("Payment failed to delete: ", e)
+        
+    # Remove "session_id"
+    try:
+        # Remove the session_id from owner's session_ids list if present
+        session_id = data_obj.get("id")
+        if session_id and owner.session_ids and session_id in owner.session_ids:
+            owner.session_ids.remove(session_id)
+            db.commit()
+    except Exception as e:
+        print("Failed to remove session_id from owner: ", e)
+    
+    # Create event - save only when all datapoints are available, no duplicate due to earlier check
+    await _create_event(db, data.get("id"), data.get("type"), owner.customer_id)
+    
+    return {
+        "status": "success"
+    }
+        
+async def _handle_subscription_created(db, data):
+    """Handles the customer.subscription.created webhook"""
+    main_data = data.get("data")
+    data_obj = main_data.get("object")
+    customer_id = data_obj.get("customer")
+    owner_id = data_obj.get("metadata").get("owner_id")
+    unique_id = data_obj.get("metadata").get("unique_id")
+
+    # Idempotency check
+    is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"), customer_id)
+    
+    if is_already_processed:
+        return {
+            "status": "duplicate"
+        }
+    
+    # Fetch database entries
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+    except Exception as e:
+        print("Failed to fetch owner or payment: ", e)
+        return {
+            "status": "failed"
+        }
+        
+    # Save "customer_id"
+    try:
+        payment.customer_id = customer_id
+        
+        db.commit()
+    except Exception as e:
+        print("Failed to save customer_id: ", e)
+
+    # Save "subscription_id"
+    try:
+        subscription_id = data_obj.get("id")
+
+        if subscription_id:
+            owner.subscription_id = subscription_id
+            payment.subscription_id = subscription_id
+        else:
+            raise Exception
+    except Exception as e:
+        print("Failed to save subscription_id: ", e)
+        
+    # Create event, no duplicate due to earlier check
+    await _create_event(db, data.get("id"), data.get("type"), owner.customer_id)    
+    
+    db.commit()
+    
+    return {
+        "status": "success"
+    }
+    
+async def _handle_invoice_created(db, data):
+    """Handles the invoice.payment_succeeded webhook"""
+    main_data = data.get("data")
+    data_obj = main_data.get("object")
+    customer_id = data_obj.get("customer")
+    owner_id = data_obj.get("lines").get("data")[0].get("metadata").get("owner_id") or data_obj.get("metadata").get("owner_id")
+    unique_id = data_obj.get("lines").get("data")[0].get("metadata").get("unique_id") or data_obj.get("metadata").get("unique_id")
+
+    print(data_obj)
+    # Idempotency check
+    is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"), customer_id)
+    
+    if is_already_processed:
+        return {
+            "status": "duplicate"
+        }
+    
+    # Fetch database entries
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+    except Exception as e:
+        print("Failed to fetch owner or payment: ", e)
+        
+    # Save "invoice_id"
+    try:
+        invoice_id = data_obj.get("id") if data_obj else None
+        
+        if invoice_id:
+            payment.invoice_id = invoice_id
+            db.commit()
+        else:
+            raise Exception
+    except Exception as e:
+        print("Failed to save invoice_id: ", e)
+    
+    # Save "invoice_pdf"
+    try:
+        invoice_pdf = data_obj.get("invoice_pdf") if data_obj else None
+        
+        if invoice_pdf:
+            payment.invoice_pdf = invoice_pdf
+            db.commit()
+        else:
+            raise Exception
+    except Exception as e:
+        print("Failed to save invoice_pdf: ", e)
+        
+    payment.status = "complete"
+    if not owner.is_verified:
+        owner.change_plan(payment.price_id)
+        owner.verify_owner(cancelled=False)
+    else:
+        if not data_obj.get("billing_reason") == "manual":
+            owner.reset_monthly_tokens()
+
+    db.commit()
+    
+    # Create event, no duplicate due to earlier check
+    await _create_event(db, data.get("id"), data.get("type"), owner.customer_id)
+        
+    return {
+        "status": "success"
+    }
+    
+async def _handle_payment_succeeded(db, data):
+    """Handles the invoice.payment_succeeded webhook"""
+    main_data = data.get("data")
+    data_obj = main_data.get("object")
+    customer_id = data_obj.get("customer")
+    owner_id = data_obj.get("metadata").get("owner_id")
+    unique_id = data_obj.get("metadata").get("unique_id")
+    pack_name = data_obj.get("metadata").get("pack_name")
+    
+    # Idempotency check
+    is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"), customer_id)
+    
+    if is_already_processed:
+        return {
+            "status": "duplicate"
+        }
+    
+    # Fetch database entries
+    try:
+        owner = await get_current_owner(db, owner_id=owner_id)
+        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+    except Exception as e:
+        print("Failed to fetch owner or payment: ", e)
+        return {
+            "status": "failed"
+        }
+        
+    payment.status = "complete"
+    owner.add_tokens(pack_name)
+    
+    db.commit()
+    
+    # Create event, no duplicate due to earlier check
+    await _create_event(db, data.get("id"), data.get("type"), owner.customer_id)
+    
+    return {
+        "status": "success"
+    }
+    
+async def _handle_idempotency_check(db, event_id, event_type, customer_id = None):
+    """Check if event has already been processed, save otherwise"""
+    is_duplicate = False
+    
+    if customer_id:
+        event = db.query(Event).filter(
+            Event.event_id == event_id,
+            Event.event_type == event_type,
+            Event.customer_id == customer_id
+        ).first()
+    else:
+        event = db.query(Event).filter(
+            Event.event_id == event_id,
+            Event.event_type == event_type
+        ).first()
+    
+    if event:
+        # DUPLICATE - ALREADY PROCESSED
+        is_duplicate = True
+
+    return is_duplicate
+    
+# -- HELPERS
+    
+async def _create_event(db, event_id, event_type, customer_id):
+    
+    new_event = Event(
+        event_id=event_id,
+        event_type=event_type,
+        customer_id=customer_id
+    )
+    db.add(new_event)
+    db.commit()
+    db.refresh(new_event)
+    
+    return {
+        "status": "success"
+    }
+    
 async def _ensure_stripe_customer(db, owner):
     """Ensure owner is a Stripe customer, create if not"""
     if owner.customer_id:
@@ -1468,6 +1760,7 @@ async def create_payment_session(
     try:
         owner = await get_current_owner(db, owner_id=request.owner_id)
         customer_id = await _ensure_stripe_customer(db, owner)
+        unique_id = str(uuid.uuid4())
         
         success_url = request.success_url or "http://localhost:3000/account/api-management"
         
@@ -1475,12 +1768,11 @@ async def create_payment_session(
             "customer": customer_id,
             "payment_method_types": ["card"],
             "success_url": success_url,
-            "metadata": {"owner_id": str(owner.id)},
+            "metadata": {"owner_id": str(owner.id), "unique_id": unique_id},
             "customer_update": {
                 "address": "auto",
                 "name": "auto"
-            },
-            "payment_method_collection": "always"
+            }
         }
         
         if request.payment_type == "subscription":
@@ -1506,8 +1798,12 @@ async def create_payment_session(
                     }
                 ],
                 "subscription_data": {
-                    "metadata": {"owner_id": str(owner.id)}
-                }
+                    "metadata": {"owner_id": str(owner.id), "unique_id": unique_id},
+                },
+                "saved_payment_method_options": {
+                    "payment_method_save": "enabled"
+                },
+                "payment_method_collection": "if_required"
             })
         else:
             if not request.price_id:
@@ -1518,10 +1814,10 @@ async def create_payment_session(
                 
             try:
                 price = stripe.Price.retrieve(request.price_id)
-                if price.type != "one_off":
+                if price.type != "one_time":
                     raise HTTPException(
                         status_code=400,
-                        detail="Price ID must be for one-off payments"
+                        detail="Price ID must be for one-time payments"
                     )
             except stripe.error.InvalidRequestError:
                 raise HTTPException(
@@ -1531,6 +1827,12 @@ async def create_payment_session(
                 
             checkout_params.update({
                 "mode": "payment",
+                "invoice_creation": {
+                    "enabled": "true",
+                    "invoice_data": {
+                        "metadata": {"owner_id": str(owner.id), "unique_id": unique_id}
+                    }
+                },
                 "line_items": [
                     {
                         "price": request.price_id,
@@ -1538,7 +1840,7 @@ async def create_payment_session(
                     }
                 ],
                 "payment_intent_data": {
-                    "metadata": {"owner_id": str(owner.id)}
+                    "metadata": {"owner_id": str(owner.id), "unique_id": unique_id, "pack_name": request.name},
                 }
             })
             
@@ -1546,6 +1848,9 @@ async def create_payment_session(
         
         payment = Payment(
             owner_id=owner.id,
+            customer_id=owner.customer_id or None,
+            session_id=session.get("id"),
+            unique_id=unique_id,
             status=session.status,
             currency="gbp",
             price_id=request.price_id,
@@ -1561,7 +1866,8 @@ async def create_payment_session(
             "session_url": session.url
         }
     
-    except stripe.error.StripeError:
+    except stripe.error.StripeError as e:
+        print(e)
         raise HTTPException(
             status_code=400,
             detail="Failed to create checkout session"
@@ -1573,7 +1879,7 @@ async def create_payment_session(
             detail="An unexpected error occurred"
         )
         
-# -- WEBHOOKS
+# -- WEBHOOK LISTENER
 
 @app.post("/api/v1/webhooks/stripe-webhooks")
 async def stripe_listener(
@@ -1583,69 +1889,99 @@ async def stripe_listener(
     # Generic data
     data = await request.json()
     event_type = data.get("type")
-    response_data = data.get("data")
-    response_obj = response_data.get("object") if response_data else None
-    customer_id = response_obj.get("customer") if response_obj else None
-    
-    owner = await get_current_owner(db, customer_id=customer_id)
-    payment = await get_payment(db, owner_id=owner.id)
     
     # -- CHECKOUT-COMPLETED WEBHOOK
     if event_type == "checkout.session.completed":
-        # Change owner's plan accordingly
-        session_id = response_obj.get("id") if response_obj else None
-        subscription_id = response_obj.get("subscription") if response_obj else None
-        status = response_obj.get("status") if response_obj else None
-        if not owner.session_ids:
-            owner.session_ids = [session_id]
-        else:
-            owner.session_ids = list(owner.session_ids) + [session_id]
         
-        if subscription_id:
-            payment.subscription_id = subscription_id
-            owner.subscription_id = subscription_id
-        if status:
-            payment.status = status
-        if session_id:
-            payment.session_id = session_id
+        if data:
+            handler = await _handle_session_completed(db, data)
             
-    # -- CHARGE-SUCCEEDED WEBHOOK
-    if event_type == "charge.succeeded":
-        # Store payment intent upon successful payment
-        payment_intent = response_obj.get("payment_intent") if response_obj else None
-        payment_method = response_obj.get("payment_method") if response_obj else None
-        if payment_intent:
-            payment.payment_intent_id = payment_intent
-        if payment_method:
-            payment.payment_method_id = payment_method
+            if handler["status"] == "success":
+                db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No data provided"
+            )
             
+        return
+
+    if event_type == "checkout.session.expired":
+        
+        if data:
+            handler = await _handle_session_expired(db, data)
+            
+            if handler["status"] == "success":
+                db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No data provided"
+            )
+            
+        return
+       
+    # -- SUBSCRIPTION-CREATED WEBHOOK
+    if event_type == "customer.subscription.created":
+        
+        if data:
+            handler = await _handle_subscription_created(db, data)
+            
+            if handler["status"] == "success":
+                db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No data provided"
+            )
+            
+        return
+
     # -- INVOICE-GENERATED WEBHOOK
     if event_type == "invoice.payment_succeeded":
         # Store invoice when payment succeeded
-        invoice_id = response_obj.get("id") if response_obj else None
-        invoice_pdf = response_obj.get("invoice_pdf") if response_obj else None
-        price_id = response_obj["lines"]["data"][0]["pricing"]["price_details"]["price"]
-        if invoice_id:
-            payment.invoice_id = invoice_id
-        if invoice_pdf:
-            payment.invoice_pdf = invoice_pdf
-        if price_id:
-            payment.price_id = price_id
+        
+        if data:
+            handler = await _handle_invoice_created(db, data)
             
-        owner.change_plan(price_id)
-        owner.verify_owner(False)
+            if handler["status"] == "success":
+                db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No data provided"
+            )
+            
+        return
     
     # -- INVOICE-FAILED WEBHOOK
     if event_type == "invoice.payment_failed":
         print(data)
+        
+    if event_type == "payment_intent.succeeded":
+
+        if data:
+            handler = await _handle_payment_succeeded(db, data)
+            
+            if handler["status"] == "success":
+                db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No data provided"
+            )
+            
+        return
     
     # -- SUBSCRIPTION-CANCELLED WEBHOOK
     if event_type == "customer.subscription.deleted":
-        print(data)
-    
-    db.commit()
-    db.refresh(payment)
-    db.refresh(owner)
+        owner = await get_current_owner(db, customer_id=data.get("data").get("object").get("customer"))
+        
+        owner.change_plan("none")
+        owner.verify_owner(cancelled=True)
+        owner.subscription_id = ""
+        
+        db.commit()
     
     return
 

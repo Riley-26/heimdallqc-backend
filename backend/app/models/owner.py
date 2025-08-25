@@ -113,25 +113,22 @@ class Owner(Base):
         return f"<Owner(id={self.id}, email={self.email})>"
     
     def change_plan(self, new_plan_id):
-        tokens = self.current_tokens
-
         # Find the plan where the "id" matches new_plan_id
         matched_plan = None
         for plan_name, plan_info in plans_dict.items():
             if plan_info["id"] == new_plan_id:
                 matched_plan = plan_name
                 break
-        print(matched_plan)
+
         if matched_plan:
             # Only increase tokens if tokens are short
             if self.current_tokens < plans_dict[matched_plan]["tokens"]:
-                tokens = plans_dict[matched_plan]["tokens"]
+                self.current_tokens = plans_dict[matched_plan]["tokens"]
                 
             self.plan = plans_dict[matched_plan]
 
             return {
-                "plan": matched_plan,
-                "tokens": tokens
+                "status": "success"
             }
         else:
             return None
@@ -144,11 +141,10 @@ class Owner(Base):
             "xl": Tokens.xl
         }
         if pack in pack_dict.keys():
-            tokens = self.current_tokens + pack_dict[pack]["tokens"]
-            return {
-                "tokens": tokens,
-                "price": pack_dict[pack]["price"]
-            }
+            self.current_tokens += pack_dict[pack]["tokens"]
+            
+            return
+        
         return None
     
     def update_prefs(self, new_prefs):
@@ -172,7 +168,7 @@ class Owner(Base):
             self.is_verified = False
             
     def reset_monthly_tokens(self):
-        """Call this to reset tokens if month has passed."""
+        """Call this to reset tokens"""
         now = datetime.now()
         if self.verified_month_end and now >= self.verified_month_end:
             self.current_tokens = self.plan.get("tokens", 0)
