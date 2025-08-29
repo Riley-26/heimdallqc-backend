@@ -113,6 +113,6 @@ class OwnerDetailResponse(OwnerResponse):
     created_at: datetime
     updated_at: datetime
     verified_at: Optional[datetime] = None
-    customer_id: str
-    subscription_id: str
-    session_ids: list
+    customer_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+    session_ids: Optional[list] = []
