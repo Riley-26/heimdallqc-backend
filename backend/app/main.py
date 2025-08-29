@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 import requests
 import os
 import json
-from jose import jwt, JWTError
 import stripe
 
 from .db.database import get_db
