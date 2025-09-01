@@ -571,8 +571,7 @@ async def confirm_jwt(
 
 @app.get("/api/v1/owners/self", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
-    owner: Owner = Depends(validate_jwt),
-    db: Session = Depends(get_db)
+    owner: Owner = Depends(validate_jwt)
 ):
     """
     Get owner by ID.
