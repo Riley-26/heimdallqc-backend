@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import UUID4
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import UUID, func
 import asyncio
 import time
 import logging
@@ -20,6 +21,8 @@ import requests
 import os
 import json
 import stripe
+import base64
+from jose import jwe
 
 from .db.database import get_db
 from .models.owner import Owner
@@ -48,7 +51,6 @@ app = FastAPI(
     description="API for Heimdall",
     version="0.1.0"
 )
-
 
 # Configure CORS
 app.add_middleware(
@@ -132,6 +134,10 @@ def send_reset_email(email: str, reset_token: str):
 # ---------- PASSWORD HASHING ----------
 
 import bcrypt
+import jwt
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+security = HTTPBearer()
 
 def hash_password(password: str) -> str:
     """Hash a password"""
@@ -224,14 +230,15 @@ async def process_submission_background(submission_id: int):
 
 async def get_current_owner(
     db: Session,
-    owner_id: int = None,
+    owner_unique_id: UUID4 = None,
     customer_id: str = None
 ):
-    """Returns owner based on either owner_id or owner's customer_id. One must be provided."""
-    if not owner_id and not customer_id:
-        raise HTTPException(status_code=400, detail="Either owner_id or customer_id must be provided")
-    if owner_id:
-        owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    """Returns owner based on either owner_unique_id or owner's customer_id. One must be provided."""
+    
+    if not owner_unique_id and not customer_id:
+        raise HTTPException(status_code=400, detail="Either owner_unique_id or customer_id must be provided")
+    if owner_unique_id:
+        owner = db.query(Owner).filter(Owner.unique_id == owner_unique_id).first()
         if not owner:
             raise HTTPException(status_code=404, detail="Owner not found")
     else:
@@ -262,6 +269,50 @@ async def get_payment(
             raise HTTPException(status_code=400, detail="Payment item not found")
     return payment
 
+def convert_unique_id(unique_id: str):
+    """Converts owner unique_id from string to UUID4 type"""
+    try:
+        owner_uuid = uuid.UUID(unique_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid JWT id format")
+    
+    return owner_uuid
+
+def validate_jwt(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Extract payload from JWT, fetches owner from it"""
+    token = credentials.credentials
+    print(f"Token starts with: {token[:20]}...")
+    print(f"Token parts count: {len(token.split('.'))}")
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256 bits for A256GCM
+        salt=b'',   # NextAuth uses empty salt
+        info=b'NextAuth.js Generated Encryption Key',  # This is the key info NextAuth uses
+    )
+    derived_key = hkdf.derive(os.getenv("NEXTAUTH_SECRET").encode())
+    try:
+        # Decrypt the JWE token
+        payload = jwe.decrypt(token, derived_key)
+        # payload is now a JSON string, parse it
+        user_data = json.loads(payload)
+        
+        # Get the user ID from the JWT payload
+        unique_id = user_data.get("sub")
+        if not unique_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+            
+        # Look up user in database
+        owner = db.query(Owner).filter(Owner.unique_id == unique_id).first()
+        if not owner:
+            raise HTTPException(status_code=401, detail="Owner not found")
+            
+        return owner
+    except Exception as e:
+        print(f"JWE Decryption Error: {e}")
+    
 
 # ---------- ANALYSIS FUNCTIONS ----------
 
@@ -510,8 +561,9 @@ async def confirm_jwt(
     """
     Confirm JWT validity
     """
+    owner_uuid = convert_unique_id(token.id)
     owner = db.query(Owner).filter(
-        Owner.id == token.id,
+        Owner.unique_id == owner_uuid,
         Owner.email == token.email
     ).first()
     if not owner:
@@ -519,18 +571,18 @@ async def confirm_jwt(
     
     return True
 
-@app.post("/api/v1/owners/{owner_id}", response_model=OwnerResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/self", response_model=OwnerResponse) # PRIVATE - LOGIN
 async def get_owner(
-    owner_id: int,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
     Get owner by ID.
     """
-    owner = await get_current_owner(db, owner_id=owner_id)
     
     return OwnerResponse(
         id=owner.id,
+        unique_id=owner.unique_id,
         email=owner.email,
         name=owner.name,
         domain=owner.domain,
@@ -541,21 +593,22 @@ async def get_owner(
         tokens_used=owner.tokens_used,
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
-        entries_needing_action=owner.entries_needing_action
+        entries_needing_action=owner.entries_needing_action,
+        is_private=owner.is_private
     )
     
-@app.post("/api/v1/owners/{owner_id}/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/self/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
 async def get_owner_details(
-    owner_id: int,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
-    Get owner by ID.
+    Get details of owner by ID.
     """
-    owner = await get_current_owner(db, owner_id=owner_id)
     
     return OwnerDetailResponse(
         id=owner.id,
+        unique_id=owner.unique_id,
         email=owner.email,
         name=owner.name,
         domain=owner.domain,
@@ -578,14 +631,16 @@ async def get_owner_details(
         verified_at=owner.verified_at,
         customer_id=owner.customer_id,
         subscription_id=owner.subscription_id,
-        session_ids=owner.session_ids
+        session_ids=owner.session_ids,
+        is_private=owner.is_private
     )
+
 
 # -- DEACTIVATE/DELETE OWNER
 
 # -- GET PLAN USAGE
 
-@app.post("/api/v1/owners/{owner_id}/invoices", response_model=Union[List[PaymentListResponse], None])
+@app.get("/api/v1/owners/{owner_id}/invoices", response_model=Union[List[PaymentListResponse], None])
 async def get_owner_invoices(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -811,7 +866,7 @@ async def reset_password(
     
     return
 
-@app.post("/api/v1/owners/{owner_id}/payment-methods", response_model=Union[List[PaymentMethodListResponse], None])
+@app.get("/api/v1/owners/{owner_id}/payment-methods", response_model=Union[List[PaymentMethodListResponse], None])
 async def get_payment_methods(
     owner_id: int,
     db: Session = Depends(get_db)
@@ -880,7 +935,7 @@ async def delete_payment_method(
 
 # ---------- SITE ENDPOINTS ----------
 
-@app.get("/api/v1/verif-sites/{site_link}", response_model=SiteSimpleResponse) # PUBLIC
+@app.get("/api/v1/verif-sites/{site_link}", response_model=Union[SiteSimpleResponse, None]) # PUBLIC
 async def check_verified_site(
     site_link: str,
     db: Session = Depends(get_db)
@@ -891,6 +946,12 @@ async def check_verified_site(
     verif_site = db.query(VerifiedSite).filter(VerifiedSite.domain == site_link).first()
     if not verif_site:
         raise HTTPException(status_code=404, detail="Site not found")
+    owner = db.query(Owner).filter(Owner.domain_id == verif_site.id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
+    if owner.is_private:
+        return None
     
     return SiteSimpleResponse(
         domain=verif_site.domain,
@@ -917,7 +978,7 @@ async def create_verif_site(domain, db):
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/v1/owners/api-keys", response_model=ApiKeyReveal) # PRIVATE - LOGIN
+@app.post("/api/v1/api-keys/create-api-key", response_model=ApiKeyReveal) # PRIVATE - LOGIN
 async def create_api_key(
     api_key_data: ApiKeyCreate, 
     db: Session = Depends(get_db)
@@ -926,13 +987,13 @@ async def create_api_key(
     Generate a new API key for an owner.
     """
     # Check if owner exists
-    owner = db.query(Owner).filter(Owner.id == api_key_data.owner_id).first()
+    owner = db.query(Owner).filter(Owner.unique_id == api_key_data.owner_unique_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
     # Generate new API key
     api_key = ApiKey(
-        owner_id=api_key_data.owner_id,
+        owner_id=owner.id,
         name=api_key_data.name,
         key=ApiKey.generate_key()
     )
@@ -942,28 +1003,22 @@ async def create_api_key(
     db.refresh(api_key)
     
     return ApiKeyReveal(
-        id=api_key.id,
-        owner_id=api_key.owner_id,
         name=api_key.name,
         is_active=True,
         key=api_key.key
     )
 
-@app.get("/api/v1/owners/{owner_id}/api-keys", response_model=List[ApiKeyListResponse]) # PRIVATE - LOGIN
+@app.get("/api/v1/api-keys/self", response_model=List[ApiKeyListResponse]) # PRIVATE - LOGIN
 async def get_api_keys(
-    owner_id: int,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
     List all API keys for an owner (with masked keys).
     """
-    # Check if owner exists
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
     
     api_keys = db.query(ApiKey).filter(
-        ApiKey.owner_id == owner_id,
+        ApiKey.owner_id == owner.id,
         ApiKey.is_active == True
     ).all()
     
@@ -978,10 +1033,10 @@ async def get_api_keys(
         for api_key in api_keys if api_keys
     ]
 
-@app.patch("/api/v1/owners/{owner_id}/api-keys/{api_key_id}/deactivate-key") # PRIVATE - LOGIN
+@app.patch("/api/v1/api-keys/deactivate-key") # PRIVATE - LOGIN
 async def deactivate_api_key(
-    owner_id: int,
     api_key_id: int,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
@@ -989,7 +1044,7 @@ async def deactivate_api_key(
     """
     api_key = db.query(ApiKey).filter(
         ApiKey.id == api_key_id,
-        ApiKey.owner_id == owner_id,
+        ApiKey.owner_id == owner.id,
         ApiKey.is_active == True
     ).first()
     if not api_key:
@@ -1004,7 +1059,7 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions", response_model=Union[SubmissionResponse, SubmissionHookResponse]) # PRIVATE - KEY
+@app.post("/api/v1/submissions", response_model=Union[SubmissionResponse, SubmissionHookResponse, None]) # PRIVATE - KEY
 async def create_submission(
     submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
@@ -1023,6 +1078,11 @@ async def create_submission(
         if owner.function_pref[i] == True:
             checked_pref = i
             break
+    if owner.current_tokens == 0:
+        
+        # SEND EMAIL
+        
+        raise HTTPException(status_code=400, detail="No tokens remaining")
     
     # Create submission record
     submission = Submission(
@@ -1058,7 +1118,12 @@ async def create_submission(
             res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
         if "tokens" in plag_res.keys():
             res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
-        
+            
+        # Delete if insufficient tokens
+        if res_tokens > owner.current_tokens:
+            db.delete(submission)
+            return None
+                
         submission.ai_result = ai_res
         submission.plag_result = plag_res
         submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
@@ -1147,21 +1212,24 @@ async def upload_submission(
     """
     Create a new submission and process it.
     """
+    owner = db.query(Owner).filter( Owner.unique_id == submission_data.owner_unique_id ).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found")
+    
     key = db.query(ApiKey).filter(
-        ApiKey.owner_id == submission_data.owner_id,
+        ApiKey.owner_id == owner.id,
         ApiKey.id == submission_data.api_key_id,
         ApiKey.is_active == True
     ).first()
     if not key:
         raise HTTPException(status_code=404, detail="No key available")
     
-    owner = db.query(Owner).filter( Owner.id == submission_data.owner_id ).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
     for i in owner.function_pref.keys():
         if owner.function_pref[i] == True:
             checked_pref = i
             break
+    if owner.current_tokens == 0:
+        raise HTTPException(status_code=400, detail="No tokens remaining")
     
     # Create submission record
     submission = Submission(
@@ -1194,6 +1262,11 @@ async def upload_submission(
             res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
         if "tokens" in plag_res.keys():
             res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
+            
+        # Delete if insufficient tokens
+        if res_tokens > owner.current_tokens:
+            db.delete(submission)
+            return None
         
         submission.ai_result = ai_res
         submission.plag_result = plag_res
@@ -1276,9 +1349,9 @@ async def upload_submission(
             message="Error processing your submission"
         )
 
-@app.get("/api/v1/owners/{owner_id}/submissions", response_model=List[SubmissionDetailResponse]) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{unique_id}/submissions", response_model=List[SubmissionDetailResponse]) # PRIVATE - LOGIN
 async def get_owner_submissions(
-    owner_id: int,
+    unique_id: int,
     skip: int = 0,
     limit: int = 50,
     status: str = None,
@@ -1286,12 +1359,12 @@ async def get_owner_submissions(
 ):
     """List submissions for an owner (for admin/dashboard use)."""
     # Verify owner exists
-    owner = db.query(Owner).filter(Owner.id == owner_id).first()
+    owner = db.query(Owner).filter(Owner.unique_id == unique_id).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
     
     # Build query
-    query = db.query(Submission).filter(Submission.owner_id == owner_id)
+    query = db.query(Submission).filter(Submission.owner_id == owner.id)
     
     # Add status filter if provided
     if status:
@@ -1328,9 +1401,9 @@ async def get_owner_submissions(
         for sub in submissions if submissions
     ]
 
-@app.get("/api/v1/owners/{owner_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/{unique_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
 async def get_submission_detailed(
-    owner_id: int,
+    unique_id: int,
     submission_id: int, 
     db: Session = Depends(get_db)
 ):
@@ -1338,7 +1411,7 @@ async def get_submission_detailed(
     # Get submission and verify ownership
     submission = db.query(Submission).filter(
         Submission.id == submission_id,
-        Submission.owner_id == owner_id
+        Submission.owner_id == unique_id
     ).first()
     
     if not submission:
@@ -1346,7 +1419,7 @@ async def get_submission_detailed(
     
     return submission
     
-@app.delete("/api/v1/owners/{owner_id}/submissions/{submission_id}/delete-submission") # PRIVATE - LOGIN
+@app.delete("/api/v1/owners/{unique_id}/submissions/{submission_id}/delete-submission") # PRIVATE - LOGIN
 async def delete_submission(
     submission_id: int,
     owner_id: int,
@@ -1367,7 +1440,7 @@ async def delete_submission(
         "message": "Successfully deleted submission"
     }
 
-@app.patch("/api/v1/owners/{owner_id}/submissions/{submission_id}/edit-submission") # PRIVATE - LOGIN
+@app.patch("/api/v1/owners/{unique_id}/submissions/{submission_id}/edit-submission") # PRIVATE - LOGIN
 async def edit_submission(
     submission_data: SubmissionEdit,
     db: Session = Depends(get_db)
@@ -1429,7 +1502,7 @@ async def login(
     return {
         "email": owner.email,
         "name": owner.name,
-        "id": owner.id
+        "id": owner.unique_id
     }
     
 
@@ -1987,4 +2060,5 @@ async def stripe_listener(
     
 if __name__ == "__main__":
     import uvicorn
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)

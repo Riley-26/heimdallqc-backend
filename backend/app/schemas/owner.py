@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Dict, Optional
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, UUID4
 
 # -- AUTH SCHEMAS
 
@@ -49,24 +49,24 @@ class OwnerUpdate(BaseModel):
 
 class SettingsUpdate(BaseModel):
     """Update owner preferences"""
-    owner_id: int
+    owner_id: UUID4
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=0, le=99)
 
 class PlanUpdate(BaseModel):
     """Update plan"""
-    owner_id: int
+    owner_id: UUID4
     plan_name: str = Field(..., pattern='^(Extrinsic|Intrinsic|Combo|None)$')
     
 class PlanCancel(BaseModel):
     """Cancel plan"""
-    owner_id: int
+    owner_id: UUID4
     immediate: bool
 
 class TokenPurchase(BaseModel):
     """Purchase additional tokens"""
-    owner_id: int
+    owner_id: UUID4
     pack_name: str = Field(..., pattern='^(sm|md|lg|xl)$')
     
 class OwnerJwt(BaseModel):
@@ -74,7 +74,7 @@ class OwnerJwt(BaseModel):
     name: Optional[str] = None
     email: str
     sub: Optional[str] = None
-    id: int
+    id: str
     exp: int
     iat: Optional[int] = None
 
@@ -84,12 +84,14 @@ class OwnerJwt(BaseModel):
 class OwnerBase(BaseModel):
     """Base fields returned in all owner responses"""
     id: int
+    unique_id: UUID4
     email: EmailStr
     name: str
     domain: str
     company: Optional[str] = None
     is_active: bool
     is_verified: bool
+    is_private: bool
 
     class Config:
         from_attributes = True

@@ -4,6 +4,8 @@ from sqlalchemy.orm import relationship
 from ..db.database import Base
 from datetime import datetime, timedelta
 from .verified_site import VerifiedSite
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 plans_dict = {
     "None": {
@@ -56,6 +58,9 @@ class Owner(Base):
     # Primary key
     id = Column(Integer, primary_key=True, index=True)
     
+    # Unique key - for referencing
+    unique_id = Column(UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
+    
     # Foreign key
     domain_id = Column(Integer, ForeignKey("verified_sites.id"), nullable=False, index=True)
     
@@ -72,6 +77,7 @@ class Owner(Base):
     
     # Account status
     customer_id = Column(String(255), nullable=True)
+    is_private = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     verified_month_end = Column(DateTime(timezone=True), nullable=True)

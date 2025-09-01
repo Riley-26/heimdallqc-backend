@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, UUID4
 
 # -- BASE MODEL
 
@@ -13,7 +13,7 @@ class WatermarkBase(BaseModel):
 
 class WatermarkCreate(WatermarkBase):
     """Input model for watermark creation"""
-    owner_id: int
+    owner_unique_id: UUID4
     submission_id: int
 
 # -- RESPONSE MODELS
@@ -31,4 +31,4 @@ class WatermarkResponse(WatermarkResponseBase):
 class WatermarkDetailResponse(WatermarkResponse):
     """Detailed response for debugging"""
     id: int
-    owner_id: int
+    owner_unique_id: UUID4

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, UUID4
 
 # -- BASE MODEL
 
@@ -21,7 +21,7 @@ class SubmissionAuto(SubmissionBase):
 
 class SubmissionManual(SubmissionBase):
     """Fields required when manually uploading"""
-    owner_id: int
+    owner_unique_id: UUID4
     api_key_id: str
     manual_upload: bool = True
     
@@ -36,7 +36,7 @@ class SubmissionEdit(BaseModel):
 class SubmissionResponseBase(BaseModel):
     """Base fields for all submission responses"""
     id: int
-    owner_id: int
+    owner_unique_id: UUID4
     status: str
     orig_text_prev: Optional[str] = None
     action_needed: bool

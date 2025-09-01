@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, UUID4
 from enum import Enum
 
 # -- BASE MODEL
@@ -12,22 +12,24 @@ class ApiKeyBase(BaseModel):
 # -- INPUT MODELS
 
 class ApiKeyCreate(ApiKeyBase):
-    owner_id: int
+    owner_unique_id: UUID4
 
 
 # -- RESPONSE MODELS
 
 class ApiKeyResponse(BaseModel):
     id: int
-    owner_id: int
+    owner_unique_id: UUID4
     name: str
     is_active: bool
 
     class Config:
         field_attributes = True
         
-class ApiKeyReveal(ApiKeyResponse):
+class ApiKeyReveal(BaseModel):
     key: str
+    name: str
+    is_active: bool
         
 class ApiKeyDetailResponse(ApiKeyResponse):
     masked_key: str

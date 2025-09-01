@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import UUID4, BaseModel, Field
 
 # -- BASE MODEL
 
 class PaymentCreate(BaseModel):
     """Base payment create model"""
-    owner_id: int
+    owner_unique_id: UUID4
     price_id: Optional[str] = Field(None, description="Stripe price ID (for subscriptions)")
     success_url: str
     payment_type: Literal["subscription", "one_off"]
@@ -25,23 +25,23 @@ class PaymentUpdate(BaseModel):
     
 class SubscriptionUpdate(BaseModel):
     """Updates subscription payment"""
-    owner_id: int
+    owner_unique_id: UUID4
     new_plan_id: str
     prorate: bool = Field(default=True)
     
 class SubscriptionCancel(BaseModel):
-    owner_id: int
+    owner_unique_id: UUID4
     is_immediate_cancel: bool = Field(default=False, description="True for immediate with refund, False for end of period")
     
 class PaymentMethodDelete(BaseModel):
-    owner_id: int
+    owner_unique_id: UUID4
     payment_method_id: str
     
 # -- RESPONSE MODELS
 
 class PaymentResponse(BaseModel):
     """Base payment model"""
-    owner_id: int
+    owner_unique_id: UUID4
     status: str
     name: str
     payment_type: str
