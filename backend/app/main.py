@@ -284,8 +284,6 @@ def validate_jwt(
 ):
     """Extract payload from JWT, fetches owner from it"""
     token = credentials.credentials
-    print(f"Token starts with: {token[:20]}...")
-    print(f"Token parts count: {len(token.split('.'))}")
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,  # 256 bits for A256GCM
