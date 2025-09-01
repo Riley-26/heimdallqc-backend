@@ -34,7 +34,6 @@ class SubscriptionCancel(BaseModel):
     is_immediate_cancel: bool = Field(default=False, description="True for immediate with refund, False for end of period")
     
 class PaymentMethodDelete(BaseModel):
-    owner_unique_id: UUID4
     payment_method_id: str
     
 # -- RESPONSE MODELS

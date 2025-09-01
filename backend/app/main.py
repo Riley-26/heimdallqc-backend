@@ -521,27 +521,27 @@ def redact_text(text: str, sources: list):
 
 @app.post("/api/v1/owners") # PUBLIC
 async def create_owner(
-    owner_data: OwnerCreate,
+    request: OwnerCreate,
     db: Session = Depends(get_db)
 ):
     """
     Create a new owner account.
     """
-    existing_owner = db.query(Owner).filter(Owner.email == owner_data.email).first()
+    existing_owner = db.query(Owner).filter(Owner.email == request.email).first()
     if existing_owner:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    verified_site = await create_verif_site(owner_data.domain, db)
+    verified_site = await create_verif_site(request.domain, db)
     if not verified_site:
         raise HTTPException(status_code=404, detail="Cannot verify site")
     
     # Create new owner
     owner = Owner(
-        email=owner_data.email,
-        domain=owner_data.domain,
-        password_hash=hash_password(owner_data.password),
-        name=owner_data.name,
-        company=owner_data.company,
+        email=request.email,
+        domain=request.domain,
+        password_hash=hash_password(request.password),
+        name=request.name,
+        company=request.company,
         domain_id=verified_site.id
     )
     
@@ -596,8 +596,7 @@ async def get_owner(
     
 @app.get("/api/v1/owners/self/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
 async def get_owner_details(
-    owner: Owner = Depends(validate_jwt),
-    db: Session = Depends(get_db)
+    owner: Owner = Depends(validate_jwt)
 ):
     """
     Get details of owner by ID.
@@ -637,17 +636,14 @@ async def get_owner_details(
 
 # -- GET PLAN USAGE
 
-@app.get("/api/v1/owners/{owner_id}/invoices", response_model=Union[List[PaymentListResponse], None])
+@app.get("/api/v1/owners/invoices/self", response_model=Union[List[PaymentListResponse], None])
 async def get_owner_invoices(
-    owner_id: int,
-    db: Session = Depends(get_db)
+    owner: Owner = Depends(validate_jwt)
 ):
     """Return list of owner's invoices for display"""
+    if not owner.customer_id:
+        return None
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        if not owner.customer_id:
-            return None
-
         # Subscriptions
         invoices = stripe.Invoice.list(
             customer=owner.customer_id
@@ -664,7 +660,6 @@ async def get_owner_invoices(
         ]
         
         return invoice_list
-    
     except stripe.error.StripeError:
         raise HTTPException(
             status_code=400,
@@ -863,17 +858,14 @@ async def reset_password(
     
     return
 
-@app.get("/api/v1/owners/{owner_id}/payment-methods", response_model=Union[List[PaymentMethodListResponse], None])
+@app.get("/api/v1/owners/payment-methods/self", response_model=Union[List[PaymentMethodListResponse], None])
 async def get_payment_methods(
-    owner_id: int,
-    db: Session = Depends(get_db)
+    owner: Owner = Depends(validate_jwt)
 ):
     """Returns list of owner's payment methods"""
+    if not owner.customer_id:
+        return None
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        if not owner.customer_id:
-            return None
-        
         # Retrieve owner's payment methods from Stripe
         payment_methods = stripe.PaymentMethod.list(
             customer=owner.customer_id,
@@ -895,15 +887,13 @@ async def get_payment_methods(
             detail="Failed to retrieve payment methods"
         )
         
-@app.delete("/api/v1/owners/{owner_id}/delete-payment-method", response_model=dict)
+@app.delete("/api/v1/owners/payment-methods/delete-payment-method", response_model=dict)
 async def delete_payment_method(
     request: PaymentMethodDelete,
-    db: Session = Depends(get_db)
+    owner: Owner = Depends(validate_jwt)
 ):
     """Delete a saved payment method"""
-    try:
-        owner = await get_current_owner(db, request.owner_id)
-        
+    try: 
         payment_method = stripe.PaymentMethod.retrieve(
             request.payment_method_id
         )
