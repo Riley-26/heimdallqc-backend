@@ -21,7 +21,6 @@ class SubmissionAuto(SubmissionBase):
 
 class SubmissionManual(SubmissionBase):
     """Fields required when manually uploading"""
-    owner_unique_id: UUID4
     api_key_id: str
     manual_upload: bool = True
     

@@ -1175,14 +1175,12 @@ async def create_submission(
 @app.post("/api/v1/submissions/upload-submission", response_model=SubmissionResponse)
 async def upload_submission(
     submission_data: SubmissionManual,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
     Create a new submission and process it.
     """
-    owner = db.query(Owner).filter( Owner.unique_id == submission_data.owner_unique_id ).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
     
     key = db.query(ApiKey).filter(
         ApiKey.owner_id == owner.id,
@@ -1254,6 +1252,7 @@ async def upload_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             message = "Submission failed to process"
             
+        # Plag score must meet criteria
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
             submission.meets_requirements = True
