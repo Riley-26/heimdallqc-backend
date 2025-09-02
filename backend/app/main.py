@@ -34,7 +34,7 @@ from .models.payment import Payment
 from .models.event import Event
 from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
-from .schemas.api_key import ApiKeyCreate, ApiKeyListResponse, ApiKeyReveal
+from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.watermark import WatermarkCreate
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionCancel, SubscriptionUpdate
@@ -519,7 +519,7 @@ def redact_text(text: str, sources: list):
 # PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
 # PRIVATE - JWT: ACCESSED VIA JWT
 
-@app.post("/api/v1/owners") # PUBLIC
+@app.post("/api/v1/owners")
 async def create_owner(
     request: OwnerCreate,
     db: Session = Depends(get_db)
@@ -551,25 +551,7 @@ async def create_owner(
     
     return
 
-@app.post("/api/v1/owners/is-valid") # PRIVATE - JWT
-async def confirm_jwt(
-    token: OwnerJwt,
-    db: Session = Depends(get_db)
-):
-    """
-    Confirm JWT validity
-    """
-    owner_uuid = convert_unique_id(token.id)
-    owner = db.query(Owner).filter(
-        Owner.unique_id == owner_uuid,
-        Owner.email == token.email
-    ).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="JWT invalid")
-    
-    return True
-
-@app.get("/api/v1/owners/self", response_model=OwnerResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/self", response_model=OwnerResponse)
 async def get_owner(
     owner: Owner = Depends(validate_jwt)
 ):
@@ -594,7 +576,7 @@ async def get_owner(
         is_private=owner.is_private
     )
     
-@app.get("/api/v1/owners/self/detailed", response_model=OwnerDetailResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/owners/self/detailed", response_model=OwnerDetailResponse)
 async def get_owner_details(
     owner: Owner = Depends(validate_jwt)
 ):
@@ -630,7 +612,6 @@ async def get_owner_details(
         session_ids=owner.session_ids,
         is_private=owner.is_private
     )
-
 
 # -- DEACTIVATE/DELETE OWNER
 
@@ -806,7 +787,7 @@ async def update_settings(
         "status": "Updated preferences successfully"
     }
 
-@app.patch("/api/v1/forgot-password") # PUBLIC
+@app.patch("/api/v1/forgot-password")
 async def forgot_password(
     request: PasswordReset,
     db: Session = Depends(get_db)
@@ -835,7 +816,7 @@ async def forgot_password(
         "message": message
     }
 
-@app.patch("/api/v1/reset-password") # PRIVATE - TOKEN
+@app.patch("/api/v1/reset-password")
 async def reset_password(
     request: PasswordUpdate,
     db: Session = Depends(get_db)
@@ -922,7 +903,7 @@ async def delete_payment_method(
 
 # ---------- SITE ENDPOINTS ----------
 
-@app.get("/api/v1/verif-sites/{site_link}", response_model=Union[SiteSimpleResponse, None]) # PUBLIC
+@app.get("/api/v1/verif-sites/{site_link}", response_model=Union[SiteSimpleResponse, None])
 async def check_verified_site(
     site_link: str,
     db: Session = Depends(get_db)
@@ -965,7 +946,7 @@ async def create_verif_site(domain, db):
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/v1/api-keys/create-api-key", response_model=ApiKeyReveal) # PRIVATE - LOGIN
+@app.post("/api/v1/api-keys/create-api-key", response_model=ApiKeyReveal)
 async def create_api_key(
     api_key_data: ApiKeyCreate, 
     db: Session = Depends(get_db)
@@ -995,7 +976,7 @@ async def create_api_key(
         key=api_key.key
     )
 
-@app.get("/api/v1/api-keys/self", response_model=List[ApiKeyListResponse]) # PRIVATE - LOGIN
+@app.get("/api/v1/api-keys/self", response_model=List[ApiKeyListResponse])
 async def get_api_keys(
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
@@ -1020,9 +1001,9 @@ async def get_api_keys(
         for api_key in api_keys if api_keys
     ]
 
-@app.patch("/api/v1/api-keys/deactivate-key") # PRIVATE - LOGIN
+@app.patch("/api/v1/api-keys/deactivate-key")
 async def deactivate_api_key(
-    api_key_id: int,
+    request: ApiKeyDeactivate,
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1030,7 +1011,7 @@ async def deactivate_api_key(
     Delete (deactivate) an API key.
     """
     api_key = db.query(ApiKey).filter(
-        ApiKey.id == api_key_id,
+        ApiKey.id == request.api_key_id,
         ApiKey.owner_id == owner.id,
         ApiKey.is_active == True
     ).first()
@@ -1046,7 +1027,7 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions", response_model=Union[SubmissionResponse, SubmissionHookResponse, None]) # PRIVATE - KEY
+@app.post("/api/v1/submissions/create-submission", response_model=Union[SubmissionResponse, SubmissionHookResponse, None])
 async def create_submission(
     submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
@@ -1191,7 +1172,7 @@ async def create_submission(
             message="Error processing your submission"
         )
 
-@app.post("/api/v1/upload-submission", response_model=SubmissionResponse) # PRIVATE - LOGIN
+@app.post("/api/v1/submissions/upload-submission", response_model=SubmissionResponse)
 async def upload_submission(
     submission_data: SubmissionManual,
     db: Session = Depends(get_db)
@@ -1336,19 +1317,15 @@ async def upload_submission(
             message="Error processing your submission"
         )
 
-@app.get("/api/v1/owners/{unique_id}/submissions", response_model=List[SubmissionDetailResponse]) # PRIVATE - LOGIN
+@app.get("/api/v1/submissions/self", response_model=List[SubmissionDetailResponse])
 async def get_owner_submissions(
-    unique_id: int,
     skip: int = 0,
     limit: int = 50,
     status: str = None,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
-    # Verify owner exists
-    owner = db.query(Owner).filter(Owner.unique_id == unique_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
     
     # Build query
     query = db.query(Submission).filter(Submission.owner_id == owner.id)
@@ -1388,17 +1365,17 @@ async def get_owner_submissions(
         for sub in submissions if submissions
     ]
 
-@app.get("/api/v1/owners/{unique_id}/submissions/{submission_id}", response_model=SubmissionDetailResponse) # PRIVATE - LOGIN
+@app.get("/api/v1/submissions/{unique_id}", response_model=SubmissionDetailResponse)
 async def get_submission_detailed(
-    unique_id: int,
-    submission_id: int, 
+    submission_id: int,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """Get detailed submission info for admin/dashboard use."""
     # Get submission and verify ownership
     submission = db.query(Submission).filter(
         Submission.id == submission_id,
-        Submission.owner_id == unique_id
+        Submission.owner_id == owner.id
     ).first()
     
     if not submission:
@@ -1406,7 +1383,7 @@ async def get_submission_detailed(
     
     return submission
     
-@app.delete("/api/v1/owners/{unique_id}/submissions/{submission_id}/delete-submission") # PRIVATE - LOGIN
+@app.delete("/api/v1/owners/{unique_id}/submissions/{submission_id}/delete-submission")
 async def delete_submission(
     submission_id: int,
     owner_id: int,
@@ -1427,7 +1404,7 @@ async def delete_submission(
         "message": "Successfully deleted submission"
     }
 
-@app.patch("/api/v1/owners/{unique_id}/submissions/{submission_id}/edit-submission") # PRIVATE - LOGIN
+@app.patch("/api/v1/owners/{unique_id}/submissions/{submission_id}/edit-submission")
 async def edit_submission(
     submission_data: SubmissionEdit,
     db: Session = Depends(get_db)

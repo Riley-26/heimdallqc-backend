@@ -14,6 +14,8 @@ class ApiKeyBase(BaseModel):
 class ApiKeyCreate(ApiKeyBase):
     owner_unique_id: UUID4
 
+class ApiKeyDeactivate(BaseModel):
+    api_key_id: int
 
 # -- RESPONSE MODELS
 
