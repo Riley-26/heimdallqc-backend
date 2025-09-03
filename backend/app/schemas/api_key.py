@@ -12,7 +12,7 @@ class ApiKeyBase(BaseModel):
 # -- INPUT MODELS
 
 class ApiKeyCreate(ApiKeyBase):
-    owner_unique_id: UUID4
+    pass
 
 class ApiKeyDeactivate(BaseModel):
     api_key_id: int

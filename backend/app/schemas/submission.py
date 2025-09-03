@@ -24,10 +24,13 @@ class SubmissionManual(SubmissionBase):
     api_key_id: str
     manual_upload: bool = True
     
+class SubmissionDelete(BaseModel):
+    """Fields for deleting a submission entry"""
+    submission_id: int
+    
 class SubmissionEdit(BaseModel):
     """Fields for editing an existing submission"""
-    entry_id: int
-    owner_id: int
+    submission_id: int
     edit_text: str
     
 # -- RESPONSE MODELS    
@@ -35,7 +38,6 @@ class SubmissionEdit(BaseModel):
 class SubmissionResponseBase(BaseModel):
     """Base fields for all submission responses"""
     id: int
-    owner_unique_id: UUID4
     status: str
     orig_text_prev: Optional[str] = None
     action_needed: bool

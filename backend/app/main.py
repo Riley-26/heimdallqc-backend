@@ -35,7 +35,7 @@ from .models.event import Event
 from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
-from .schemas.submission import SubmissionAuto, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
+from .schemas.submission import SubmissionAuto, SubmissionDelete, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.watermark import WatermarkCreate
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionCancel, SubscriptionUpdate
 
@@ -770,13 +770,10 @@ async def cancel_plan(
 @app.patch("/api/v1/owners/update-settings")
 async def update_settings(
     request: SettingsUpdate,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
-
-    owner = db.query(Owner).filter(Owner.id == request.owner_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    
+    """Updates all of the owner's settings"""
     owner.function_pref = request.function_pref
     owner.ui_pref = request.ui_pref
     owner.ai_threshold_option = request.ai_threshold_option
@@ -946,19 +943,15 @@ async def create_verif_site(domain, db):
 
 # ---------- API KEY ENDPOINTS ----------
 
-@app.post("/api/v1/api-keys/create-api-key", response_model=ApiKeyReveal)
+@app.post("/api/v1/api-keys/create-key", response_model=ApiKeyReveal)
 async def create_api_key(
-    api_key_data: ApiKeyCreate, 
+    api_key_data: ApiKeyCreate,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """
     Generate a new API key for an owner.
     """
-    # Check if owner exists
-    owner = db.query(Owner).filter(Owner.unique_id == api_key_data.owner_unique_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    
     # Generate new API key
     api_key = ApiKey(
         owner_id=owner.id,
@@ -1046,7 +1039,7 @@ async def create_submission(
         if owner.function_pref[i] == True:
             checked_pref = i
             break
-    if owner.current_tokens == 0:
+    if owner.current_tokens <= 0:
         
         # SEND EMAIL
         
@@ -1078,10 +1071,12 @@ async def create_submission(
         db.commit()
         
         processing_result = await process_text(submission_data.orig_text, checked_pref)
+        
         ai_res = processing_result["ai_result"]
         plag_res = processing_result["plag_result"]
         res_tokens = 0
         
+        # Set tokens, scaled using markup factor
         if "tokens" in ai_res.keys():
             res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
         if "tokens" in plag_res.keys():
@@ -1092,6 +1087,7 @@ async def create_submission(
             db.delete(submission)
             return None
                 
+        # Start updating submission entry
         submission.ai_result = ai_res
         submission.plag_result = plag_res
         submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
@@ -1181,7 +1177,6 @@ async def upload_submission(
     """
     Create a new submission and process it.
     """
-    
     key = db.query(ApiKey).filter(
         ApiKey.owner_id == owner.id,
         ApiKey.id == submission_data.api_key_id,
@@ -1194,7 +1189,10 @@ async def upload_submission(
         if owner.function_pref[i] == True:
             checked_pref = i
             break
-    if owner.current_tokens == 0:
+    if owner.current_tokens <= 0:
+        
+        # SEND EMAIL
+        
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
     # Create submission record
@@ -1220,10 +1218,12 @@ async def upload_submission(
         db.commit()
         
         processing_result = await process_text(submission_data.orig_text, checked_pref)
+        
         ai_res = processing_result["ai_result"]
         plag_res = processing_result["plag_result"]
         res_tokens = 0
         
+        # Set tokens, scaled by markup factor
         if "tokens" in ai_res.keys():
             res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
         if "tokens" in plag_res.keys():
@@ -1234,6 +1234,7 @@ async def upload_submission(
             db.delete(submission)
             return None
         
+        # Start updating submission entry
         submission.ai_result = ai_res
         submission.plag_result = plag_res
         submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
@@ -1364,7 +1365,7 @@ async def get_owner_submissions(
         for sub in submissions if submissions
     ]
 
-@app.get("/api/v1/submissions/{unique_id}", response_model=SubmissionDetailResponse)
+@app.get("/api/v1/submissions/{submission_id}", response_model=SubmissionDetailResponse)
 async def get_submission_detailed(
     submission_id: int,
     owner: Owner = Depends(validate_jwt),
@@ -1376,47 +1377,43 @@ async def get_submission_detailed(
         Submission.id == submission_id,
         Submission.owner_id == owner.id
     ).first()
-    
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
     return submission
     
-@app.delete("/api/v1/owners/{unique_id}/submissions/{submission_id}/delete-submission")
+@app.delete("/api/v1/submissions/delete-submission")
 async def delete_submission(
-    submission_id: int,
-    owner_id: int,
+    request: SubmissionDelete,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     submission = db.query(Submission).filter(
-        Submission.id == submission_id,
-        Submission.owner_id == owner_id
+        Submission.id == request.submission_id,
+        Submission.owner_id == owner.id
     ).first()
-    
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
     db.delete(submission)
     db.commit()
     
-    return {
-        "message": "Successfully deleted submission"
-    }
+    return
 
-@app.patch("/api/v1/owners/{unique_id}/submissions/{submission_id}/edit-submission")
+@app.patch("/api/v1/submissions/edit-submission")
 async def edit_submission(
-    submission_data: SubmissionEdit,
+    request: SubmissionEdit,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     submission = db.query(Submission).filter(
-        Submission.id == submission_data.entry_id,
-        Submission.owner_id == submission_data.owner_id
+        Submission.id == request.submission_id,
+        Submission.owner_id == owner.id
     ).first()
-    
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
-
-    submission.edit_text = submission_data.edit_text
+    
+    submission.edit_text = request.edit_text
     submission.edited = True
     submission.edited_at = datetime.now()
     

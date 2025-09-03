@@ -49,7 +49,6 @@ class OwnerUpdate(BaseModel):
 
 class SettingsUpdate(BaseModel):
     """Update owner preferences"""
-    owner_id: UUID4
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=0, le=99)
