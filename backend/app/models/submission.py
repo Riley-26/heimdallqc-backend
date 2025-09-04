@@ -4,7 +4,8 @@ from sqlalchemy.orm import relationship
 from ..db.database import Base
 from datetime import datetime
 import enum
-
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 class ProcessingStatus:
     PENDING = "pending"
@@ -19,6 +20,8 @@ class Submission(Base):
 
     # Primary key
     id = Column(Integer, primary_key=True, index=True)
+
+    unique_id = Column(UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
     
     # Foreign keys
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)

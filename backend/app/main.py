@@ -650,12 +650,11 @@ async def get_owner_invoices(
 @app.patch("/api/v1/owners/update-plan")
 async def change_plan(
     request: SubscriptionUpdate,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db),
 ):
     """Upgrade/Downgrade owner's plan, calculate proration accordingly"""
     try:
-        owner = await get_current_owner(db, owner_id=request.owner_id)
-        
         subscription = stripe.Subscription.retrieve(owner.subscription_id)
         
         if subscription.customer != owner.customer_id:
@@ -671,7 +670,7 @@ async def change_plan(
                 'id': subscription['items']['data'][0]['id'],
                 'price': request.new_plan_id
             }],
-            proration_behavior='create_prorations' if request.prorate else 'none'
+            proration_behavior='create_prorations'
         )
         if not updated_subscription:
             raise HTTPException(
@@ -706,48 +705,6 @@ async def cancel_plan(
                 status_code=403,
                 detail="Unauthorised attempt"
             )
-        
-        # -- PRORATE REFUND - FOR FUTURE USE
-        
-        """
-        if request.is_immediate_cancel:
-            # Create refund for prorated amount
-            cancelled_sub = stripe.Subscription.cancel(
-                owner.subscription_id
-            )
-            
-            latest_invoice = stripe.Invoice.list(
-                customer=owner.customer_id,
-                subscription=owner.subscription_id,
-                limit=1
-            ).data[0]
-            
-            if latest_invoice.status == "paid":
-                # Calculate prorated amount
-                now = datetime.now().timestamp()
-                period_start = subscription["items"].data[0].current_period_start
-                period_end = subscription["items"].data[0].current_period_end
-                
-                if now < period_end:
-                    processing_fee = 0.95
-                    unused_time = period_end - now
-                    total_time = period_end - period_start
-                    refund_ratio = unused_time / total_time
-                    refund_amount = int(latest_invoice.amount_paid * refund_ratio * processing_fee)
-                    
-                    payment = await get_payment(db=db, owner_id=owner.id, subscription_id=owner.subscription_id)
-                    
-                    # Create refund
-                    stripe.Refund.create(
-                        payment_intent=payment.payment_intent_id,
-                        amount=refund_amount,
-                        reason="requested_by_customer"
-                    )
-            
-            message = "Subscription cancelled immediately"
-        """
-        
-        # --
         
         # Cancel at period end
         stripe.Subscription.modify(

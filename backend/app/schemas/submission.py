@@ -30,7 +30,7 @@ class SubmissionDelete(BaseModel):
     
 class SubmissionEdit(BaseModel):
     """Fields for editing an existing submission"""
-    submission_id: int
+    submission_unique_id: int
     edit_text: str
     
 # -- RESPONSE MODELS    
@@ -57,6 +57,7 @@ class SubmissionResponse(SubmissionResponseBase):
     
 class SubmissionDetailResponse(SubmissionResponse):
     """Detailed response for admin/owner views"""
+    unique_id: UUID4
     orig_text: str
     edit_text: Optional[str] = None
     ai_result: dict
