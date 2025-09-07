@@ -2,7 +2,7 @@ import math
 import secrets
 from typing import List, Optional, Union
 import uuid
-from fastapi import FastAPI, Depends, HTTPException, Request, BackgroundTasks, status, Header
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, BackgroundTasks, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -37,7 +37,7 @@ from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionDelete, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.watermark import WatermarkCreate
-from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionCancel, SubscriptionUpdate
+from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionUpdate
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
@@ -230,7 +230,7 @@ async def process_submission_background(submission_id: int):
 
 async def get_current_owner(
     db: Session,
-    owner_unique_id: UUID4 = None,
+    owner_unique_id: str = None,
     customer_id: str = None
 ):
     """Returns owner based on either owner_unique_id or owner's customer_id. One must be provided."""
@@ -250,15 +250,15 @@ async def get_current_owner(
 async def get_payment(
     db: Session,
     unique_id: str,
-    owner_id: int = None,
+    owner_unique_id: str = None,
     subscription_id: str = None
 ):
     """Returns payment item identified using subscription_id"""
-    if not owner_id and not subscription_id:
-        raise HTTPException(status_code=400, detail="Either owner_id or subscription_id must be provided")
-    if owner_id:
+    if not owner_unique_id and not subscription_id:
+        raise HTTPException(status_code=400, detail="Either owner_unique_id or subscription_id must be provided")
+    if owner_unique_id:
         payment = db.query(Payment).filter(
-            Payment.owner_id == owner_id,
+            Payment.owner_unique_id == owner_unique_id,
             Payment.unique_id == unique_id
         ).first()
         if not payment:
@@ -549,7 +549,10 @@ async def create_owner(
     db.commit()
     db.refresh(owner)
     
-    return
+    return LoginRequest(
+        email=owner.email,
+        password=request.password
+    )
 
 @app.get("/api/v1/owners/self", response_model=OwnerResponse)
 async def get_owner(
@@ -573,6 +576,7 @@ async def get_owner(
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
+        texts_analysed=owner.texts_analysed,
         is_private=owner.is_private
     )
     
@@ -598,6 +602,7 @@ async def get_owner_details(
         watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
+        texts_analysed=owner.texts_analysed,
         domain_id=owner.domain_id,
         verified_month_end=owner.verified_month_end,
         plan=owner.plan,
@@ -689,15 +694,13 @@ async def change_plan(
         db.commit()
         return
         
-@app.put("/api/v1/owners/cancel-plan")
+@app.patch("/api/v1/owners/cancel-plan")
 async def cancel_plan(
-    request: SubscriptionCancel,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):  
     """Cancel owners subscription, providing a refund of the unused amount. Must have an active subscription."""
     try:
-        owner = await get_current_owner(db, owner_id=request.owner_id)
-        
         subscription = stripe.Subscription.retrieve(owner.subscription_id)
         
         if subscription.customer != owner.customer_id:
@@ -734,6 +737,7 @@ async def update_settings(
     owner.function_pref = request.function_pref
     owner.ui_pref = request.ui_pref
     owner.ai_threshold_option = request.ai_threshold_option
+    owner.is_private = request.privacy_mode
     
     db.commit()
     
@@ -832,13 +836,12 @@ async def delete_payment_method(
         payment_method = stripe.PaymentMethod.retrieve(
             request.payment_method_id
         )
-        
         if payment_method.customer != owner.customer_id:
             raise HTTPException(
                 status_code=403,
                 detail="Unauthorised attempt"
             )
-            
+        
         # Delete payment method
         stripe.PaymentMethod.detach(
             request.payment_method_id
@@ -977,7 +980,7 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions/create-submission", response_model=Union[SubmissionResponse, SubmissionHookResponse, None])
+@app.post("/api/v1/submissions/create-submission")
 async def create_submission(
     submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
@@ -1025,6 +1028,7 @@ async def create_submission(
     try:
         # Update status to processing
         submission.update_status(ProcessingStatus.PROCESSING)
+        owner.texts_analysed = owner.texts_analysed + 1
         db.commit()
         
         processing_result = await process_text(submission_data.orig_text, checked_pref)
@@ -1058,10 +1062,10 @@ async def create_submission(
                 submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
-            message = "Submission processed."
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            message = "Submission failed to process"
+            
+        db.commit()
             
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
@@ -1074,17 +1078,10 @@ async def create_submission(
                 "plag_score": plag_res["score"],
                 "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
             }
-            
-            watermark = _create_watermark(db, data)
-            
-            return SubmissionHookResponse(
-                watermark_id=watermark.id,
-                temp_text=submission.temp_text
-            )
+            db.commit()
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
-                message = "AI score below threshold"
                 submission.meets_requirements = False
             else:
                 submission.meets_requirements = True
@@ -1092,40 +1089,35 @@ async def create_submission(
         db.commit()
         db.refresh(submission)
         
-        return SubmissionResponse(
-            id=submission.id,
-            owner_id=submission.owner_id,
-            status=submission.status,
-            orig_text_prev=submission.orig_text[:30],
-            action_needed=submission.action_needed,
-            manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used,
-            created_at=submission.created_at,
-            meets_requirements=submission.meets_requirements,
-            failure_reason=submission.failure_reason,
-            completed_processing_at=submission.completed_processing_at,
-            message=message
-        )
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
-        return SubmissionResponse(
-            id=submission.id,
-            owner_id=submission.owner_id,
-            status=submission.status,
-            orig_text_prev=submission.orig_text[:30],
-            action_needed=submission.action_needed,
-            manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used,
-            created_at=submission.created_at,
-            meets_requirements=submission.meets_requirements,
-            failure_reason=submission.failure_reason,
-            completed_processing_at=submission.completed_processing_at,
-            message="Error processing your submission"
-        )
+        return {
+            "status": "failed"
+        }
+        
+    # Create watermark once everything is completed
+    try:
+        if data:
+            watermark = await _create_watermark(db, data)
+        
+        if watermark:
+            owner.watermarks_made = owner.watermarks_made + 1
+            db.commit()
+            
+            return SubmissionHookResponse(
+                watermark_id=watermark.id,
+                temp_text=submission.temp_text,
+                orig_text=submission.orig_text
+            )
+    except Exception as e:
+        return {
+            "status": "completed",
+            "watermark_status": "failed"
+        }
 
-@app.post("/api/v1/submissions/upload-submission", response_model=SubmissionResponse)
+@app.post("/api/v1/submissions/upload-submission")
 async def upload_submission(
     submission_data: SubmissionManual,
     owner: Owner = Depends(validate_jwt),
@@ -1172,6 +1164,7 @@ async def upload_submission(
     try:
         # Update status to processing
         submission.update_status(ProcessingStatus.PROCESSING)
+        owner.texts_analysed = owner.texts_analysed + 1
         db.commit()
         
         processing_result = await process_text(submission_data.orig_text, checked_pref)
@@ -1205,35 +1198,27 @@ async def upload_submission(
                 submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
-            message = "Submission processed."
         else:
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            message = "Submission failed to process"
+            
+        db.commit()
             
         # Plag score must meet criteria
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
             submission.update_action(True)
             submission.meets_requirements = True
+            owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
             data = {
                 "owner_id": owner.id,
                 "submission_id": submission.id,
-                "ai_res": ai_res["score"],
-                "plag_res": plag_res["score"],
+                "ai_score": ai_res["score"],
+                "plag_score": plag_res["score"],
                 "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
             }
-            
-            watermark = await _create_watermark(db, data)
-            
-            return SubmissionHookResponse(
-                watermark_id=watermark.id,
-                temp_text=submission.temp_text
-            )
+            db.commit()
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
-                db.commit()
-                db.refresh(submission)
-                message = "AI score below threshold"
                 submission.meets_requirements = False
             else:
                 submission.meets_requirements = True
@@ -1241,48 +1226,43 @@ async def upload_submission(
         db.commit()
         db.refresh(submission)
         
-        return SubmissionResponse(
-            id=submission.id,
-            owner_id=submission.owner_id,
-            status=submission.status,
-            orig_text_prev=submission.orig_text[:30],
-            action_needed=submission.action_needed,
-            manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used,
-            created_at=submission.created_at,
-            meets_requirements=submission.meets_requirements,
-            failure_reason=submission.failure_reason,
-            completed_processing_at=submission.completed_processing_at,
-            message=message
-        )   
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
-        return SubmissionResponse(
-            id=submission.id,
-            owner_id=submission.owner_id,
-            status=submission.status,
-            orig_text_prev=submission.orig_text[:30],
-            action_needed=submission.action_needed,
-            manual_upload=submission.manual_upload,
-            tokens_used=submission.tokens_used,
-            created_at=submission.created_at,
-            meets_requirements=submission.meets_requirements,
-            failure_reason=submission.failure_reason,
-            completed_processing_at=submission.completed_processing_at,
-            message="Error processing your submission"
-        )
+        return {
+            "status": "failed"
+        }
+    
+    # Create watermark once everything is completed
+    try:
+        if data:
+            watermark = await _create_watermark(db, data)
+        
+        if watermark:
+            owner.watermarks_made = owner.watermarks_made + 1
+            db.commit()
+            
+            return SubmissionHookResponse(
+                watermark_id=watermark.id,
+                temp_text=submission.temp_text,
+                orig_text=submission.orig_text
+            )
+    except Exception as e:
+        return {
+            "status": "completed",
+            "watermark_status": "failed"
+        }
 
-@app.get("/api/v1/submissions/self", response_model=List[SubmissionDetailResponse])
+@app.get("/api/v1/submissions/self", response_model=List[SubmissionResponse])
 async def get_owner_submissions(
-    skip: int = 0,
-    limit: int = 50,
-    status: str = None,
+    page: int = Query(1, ge=1),
+    status: str = "success",
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
+    limit = 10
     
     # Build query
     query = db.query(Submission).filter(Submission.owner_id == owner.id)
@@ -1292,52 +1272,137 @@ async def get_owner_submissions(
         query = query.filter(Submission.status == status)
     
     # Get submissions with pagination
-    submissions = query.order_by(Submission.created_at.desc()).offset(skip).limit(limit).all()
-    
+    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+
     # Return list response
     return [
-        SubmissionDetailResponse(
+        SubmissionResponse(
             id=sub.id,
-            owner_id=sub.owner_id,
-            api_key_id=sub.api_key_id,
             status=sub.status,
             action_needed=sub.action_needed,
             manual_upload=sub.manual_upload,
             tokens_used=sub.tokens_used,
             created_at=sub.created_at,
+            unique_id=sub.unique_id,
             meets_requirements=sub.meets_requirements,
-            failure_reason=sub.failure_reason,
-            completed_processing_at=sub.completed_processing_at,
             orig_text=sub.orig_text,
             edit_text=sub.edit_text,
+            temp_text=sub.temp_text,
             ai_result=sub.ai_result,
             plag_result=sub.plag_result,
-            domain=sub.domain,
-            page_link=sub.page_link,
-            function_pref=sub.function_pref,
             edited=sub.edited,
-            edited_at=sub.edited_at,
-            temp_text=sub.temp_text,
+            page_link=sub.page_link,
+            domain=sub.domain,
+            function_pref=sub.function_pref,
         )
         for sub in submissions if submissions
     ]
 
 @app.get("/api/v1/submissions/{submission_id}", response_model=SubmissionDetailResponse)
 async def get_submission_detailed(
-    submission_id: int,
+    submission_id: str,
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """Get detailed submission info for admin/dashboard use."""
     # Get submission and verify ownership
     submission = db.query(Submission).filter(
-        Submission.id == submission_id,
+        Submission.unique_id == submission_id,
         Submission.owner_id == owner.id
     ).first()
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
-    return submission
+    return SubmissionDetailResponse(
+        id=submission.id,
+        status=submission.status,
+        action_needed=submission.action_needed,
+        manual_upload=submission.manual_upload,
+        tokens_used=submission.tokens_used,
+        created_at=submission.created_at,
+        unique_id=submission.unique_id,
+        meets_requirements=submission.meets_requirements,
+        orig_text=submission.orig_text,
+        edit_text=submission.edit_text,
+        temp_text=submission.temp_text,
+        ai_result=submission.ai_result,
+        plag_result=submission.plag_result,
+        edited=submission.edited,
+        page_link=submission.page_link,
+        domain=submission.domain,
+        function_pref=submission.function_pref,
+        api_key_id=submission.api_key_id,
+        owner_id=submission.owner_id,
+        failure_reason=submission.failure_reason,
+        completed_processing_at=submission.completed_processing_at,
+        edited_at=submission.edited_at
+    )
+   
+@app.get("/api/v1/submissions/self/action-needed", response_model=List[SubmissionResponse])
+async def get_submissions_action(
+    page: int = Query(1, ge=1),
+    status: str = "success",
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """List submissions for an owner (for admin/dashboard use)."""
+    limit = 10
+
+    # Build query
+    query = db.query(Submission).filter(Submission.owner_id == owner.id)
+    
+    # Add status filter if provided
+    if status:
+        query = query.filter(
+            Submission.status == status,
+            Submission.action_needed == True
+        )
+    
+    # Get submissions with pagination
+    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+    
+    # Return list response
+    return [
+        SubmissionResponse(
+            id=sub.id,
+            status=sub.status,
+            action_needed=sub.action_needed,
+            manual_upload=sub.manual_upload,
+            tokens_used=sub.tokens_used,
+            created_at=sub.created_at,
+            unique_id=sub.unique_id,
+            meets_requirements=sub.meets_requirements,
+            orig_text=sub.orig_text,
+            edit_text=sub.edit_text,
+            temp_text=sub.temp_text,
+            ai_result=sub.ai_result,
+            plag_result=sub.plag_result,
+            edited=sub.edited,
+            page_link=sub.page_link,
+            domain=sub.domain,
+            function_pref=sub.function_pref,
+        )
+        for sub in submissions if submissions
+    ]
+    
+@app.get("/api/v1/submissions/self/entry-count")
+async def get_submission_count(
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """Get a count of all submissions, split into action-needed and not"""
+    
+    entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id).all())
+    action_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.action_needed == True).all())
+    success_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.status == "success").all())
+    success_action_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.action_needed == True, Submission.status == "success").all())
+    
+    return {
+        "ententry_countries": entry_count,
+        "action_entry_count": action_entry_count,
+        "success_entry_count": success_entry_count,
+        "success_action_entry_count": success_action_entry_count,
+    }
     
 @app.delete("/api/v1/submissions/delete-submission")
 async def delete_submission(
@@ -1346,7 +1411,7 @@ async def delete_submission(
     db: Session = Depends(get_db)
 ):
     submission = db.query(Submission).filter(
-        Submission.id == request.submission_id,
+        Submission.unique_id == request.submission_unique_id,
         Submission.owner_id == owner.id
     ).first()
     if not submission:
@@ -1364,7 +1429,7 @@ async def edit_submission(
     db: Session = Depends(get_db)
 ):
     submission = db.query(Submission).filter(
-        Submission.id == request.submission_id,
+        Submission.unique_id == request.submission_unique_id,
         Submission.owner_id == owner.id
     ).first()
     if not submission:
@@ -1383,7 +1448,7 @@ async def edit_submission(
     
     return
 
-def _create_watermark(db, req=WatermarkCreate):
+async def _create_watermark(db, req=WatermarkCreate):
     
     watermark = Watermark(
         owner_id=req["owner_id"],
@@ -1431,7 +1496,7 @@ async def _handle_session_completed(db, data):
     """Handles the checkout.session.completed webhook"""
     main_data = data.get("data")
     data_obj = main_data.get("object")
-    owner_id = data_obj.get("metadata").get("owner_id")
+    owner_unique_id = data_obj.get("metadata").get("owner_unique_id")
     unique_id = data_obj.get("metadata").get("unique_id")
 
     # Idempotency check
@@ -1444,8 +1509,8 @@ async def _handle_session_completed(db, data):
     
     # Fetch database entries
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
     
@@ -1468,13 +1533,13 @@ async def _handle_session_expired(db, data):
     """Handles the checkout.session.expired webhook"""
     main_data = data.get("data")
     data_obj = main_data.get("object")
-    owner_id = data_obj.get("metadata").get("owner_id")
+    owner_unique_id = data_obj.get("metadata").get("owner_unique_id")
     unique_id = data_obj.get("metadata").get("unique_id")
     
     # Fetch database entries
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
         
@@ -1507,7 +1572,7 @@ async def _handle_subscription_created(db, data):
     main_data = data.get("data")
     data_obj = main_data.get("object")
     customer_id = data_obj.get("customer")
-    owner_id = data_obj.get("metadata").get("owner_id")
+    owner_unique_id = data_obj.get("metadata").get("owner_unique_id")
     unique_id = data_obj.get("metadata").get("unique_id")
 
     # Idempotency check
@@ -1520,8 +1585,8 @@ async def _handle_subscription_created(db, data):
     
     # Fetch database entries
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
         return {
@@ -1562,10 +1627,9 @@ async def _handle_invoice_created(db, data):
     main_data = data.get("data")
     data_obj = main_data.get("object")
     customer_id = data_obj.get("customer")
-    owner_id = data_obj.get("lines").get("data")[0].get("metadata").get("owner_id") or data_obj.get("metadata").get("owner_id")
+    owner_unique_id = data_obj.get("lines").get("data")[0].get("metadata").get("owner_unique_id") or data_obj.get("metadata").get("owner_unique_id")
     unique_id = data_obj.get("lines").get("data")[0].get("metadata").get("unique_id") or data_obj.get("metadata").get("unique_id")
 
-    print(data_obj)
     # Idempotency check
     is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"), customer_id)
     
@@ -1576,8 +1640,8 @@ async def _handle_invoice_created(db, data):
     
     # Fetch database entries
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
         
@@ -1611,7 +1675,7 @@ async def _handle_invoice_created(db, data):
         owner.verify_owner(cancelled=False)
     else:
         if not data_obj.get("billing_reason") == "manual":
-            owner.reset_monthly_tokens()
+            owner.add_monthly_tokens()
 
     db.commit()
     
@@ -1627,7 +1691,7 @@ async def _handle_payment_succeeded(db, data):
     main_data = data.get("data")
     data_obj = main_data.get("object")
     customer_id = data_obj.get("customer")
-    owner_id = data_obj.get("metadata").get("owner_id")
+    owner_unique_id = data_obj.get("metadata").get("owner_unique_id")
     unique_id = data_obj.get("metadata").get("unique_id")
     pack_name = data_obj.get("metadata").get("pack_name")
     
@@ -1641,8 +1705,8 @@ async def _handle_payment_succeeded(db, data):
     
     # Fetch database entries
     try:
-        owner = await get_current_owner(db, owner_id=owner_id)
-        payment = await get_payment(db, owner_id=owner.id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
         return {
@@ -1717,7 +1781,7 @@ async def _ensure_stripe_customer(db, owner):
         )
         
         # Save to db
-        await _update_owner_stripe_customer_id(db, owner.id, customer.id)
+        await _update_owner_stripe_customer_id(db, owner.unique_id, customer.id)
         
         return customer.id
     except stripe.error.StripeError as e:
@@ -1728,11 +1792,11 @@ async def _ensure_stripe_customer(db, owner):
         
 async def _update_owner_stripe_customer_id(
     db: Session,
-    owner_id: int,
+    owner_unique_id: str,
     customer_id: str
 ):
     """Updates owner's Stripe customer ID in database"""
-    owner = await get_current_owner(db, owner_id=owner_id)
+    owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
     owner.customer_id = customer_id
     
     db.commit()
@@ -1743,21 +1807,26 @@ async def _update_owner_stripe_customer_id(
 @app.post("/api/v1/payments/create-payment-session", response_model=dict)
 async def create_payment_session(
     request: PaymentCreate,
+    owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """Create a payment (subscription or one_off), creates Stripe customer if needed"""
+    
+    # CANNOT PURCHASE IF NOT SUBSCRIBED
+    if request.payment_type == "one_off" and not owner.is_verified:
+        raise HTTPException(status_code=400, detail="You must have a subscription before buying tokens")
+        
     try:
-        owner = await get_current_owner(db, owner_id=request.owner_id)
         customer_id = await _ensure_stripe_customer(db, owner)
         unique_id = str(uuid.uuid4())
         
-        success_url = request.success_url or "http://localhost:3000/account/api-management"
+        success_url = request.success_url or None
         
         checkout_params = {
             "customer": customer_id,
             "payment_method_types": ["card"],
             "success_url": success_url,
-            "metadata": {"owner_id": str(owner.id), "unique_id": unique_id},
+            "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id},
             "customer_update": {
                 "address": "auto",
                 "name": "auto"
@@ -1765,6 +1834,7 @@ async def create_payment_session(
         }
         
         if request.payment_type == "subscription":
+            print(1)
             try:
                 price = stripe.Price.retrieve(request.price_id)
                 if price.type != "recurring":
@@ -1787,7 +1857,7 @@ async def create_payment_session(
                     }
                 ],
                 "subscription_data": {
-                    "metadata": {"owner_id": str(owner.id), "unique_id": unique_id},
+                    "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id},
                 },
                 "saved_payment_method_options": {
                     "payment_method_save": "enabled"
@@ -1819,7 +1889,7 @@ async def create_payment_session(
                 "invoice_creation": {
                     "enabled": "true",
                     "invoice_data": {
-                        "metadata": {"owner_id": str(owner.id), "unique_id": unique_id}
+                        "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id}
                     }
                 },
                 "line_items": [
@@ -1829,14 +1899,17 @@ async def create_payment_session(
                     }
                 ],
                 "payment_intent_data": {
-                    "metadata": {"owner_id": str(owner.id), "unique_id": unique_id, "pack_name": request.name},
+                    "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id, "pack_name": request.name},
+                },
+                "saved_payment_method_options": {
+                    "payment_method_save": "enabled"
                 }
             })
             
         session = stripe.checkout.Session.create(**checkout_params)
         
         payment = Payment(
-            owner_id=owner.id,
+            owner_unique_id=owner.unique_id,
             customer_id=owner.customer_id or None,
             session_id=session.get("id"),
             unique_id=unique_id,

@@ -51,7 +51,8 @@ class SettingsUpdate(BaseModel):
     """Update owner preferences"""
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
-    ai_threshold_option: int = Field(ge=0, le=99)
+    ai_threshold_option: int = Field(ge=40, le=99)
+    privacy_mode: bool
 
 class PlanUpdate(BaseModel):
     """Update plan"""
@@ -102,6 +103,7 @@ class OwnerResponse(OwnerBase):
     watermarks_made: int
     plagiarisms_prevented: int
     entries_needing_action: int
+    texts_analysed: int
 
 class OwnerDetailResponse(OwnerResponse):
     """Detailed owner response with preferences"""

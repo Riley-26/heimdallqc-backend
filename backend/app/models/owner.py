@@ -103,6 +103,7 @@ class Owner(Base):
     watermarks_made = Column(Integer, default=0, nullable=False)
     plagiarisms_prevented = Column(Integer, default=0, nullable=False)
     entries_needing_action = Column(Integer, default=0, nullable=False)
+    texts_analysed = Column(Integer, default=0, nullable=False)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -173,7 +174,7 @@ class Owner(Base):
         else:
             self.is_verified = False
             
-    def reset_monthly_tokens(self):
+    def add_monthly_tokens(self):
         """Call this to reset tokens"""
         now = datetime.now()
         if self.verified_month_end and now >= self.verified_month_end:

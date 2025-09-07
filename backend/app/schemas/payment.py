@@ -6,7 +6,6 @@ from pydantic import UUID4, BaseModel, Field
 
 class PaymentCreate(BaseModel):
     """Base payment create model"""
-    owner_unique_id: UUID4
     price_id: Optional[str] = Field(None, description="Stripe price ID (for subscriptions)")
     success_url: str
     payment_type: Literal["subscription", "one_off"]
@@ -25,13 +24,7 @@ class PaymentUpdate(BaseModel):
     
 class SubscriptionUpdate(BaseModel):
     """Updates subscription payment"""
-    owner_unique_id: UUID4
     new_plan_id: str
-    prorate: bool = Field(default=True)
-    
-class SubscriptionCancel(BaseModel):
-    owner_unique_id: UUID4
-    is_immediate_cancel: bool = Field(default=False, description="True for immediate with refund, False for end of period")
     
 class PaymentMethodDelete(BaseModel):
     payment_method_id: str

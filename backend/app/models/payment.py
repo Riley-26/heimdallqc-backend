@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Table, ForeignKey, JSON, func
 from ..db.database import Base
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -9,7 +11,7 @@ class Payment(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     # Foreign key
-    owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
+    owner_unique_id = Column(UUID(as_uuid=True), ForeignKey("owners.unique_id"), nullable=False)
     
     # Unique metadata ID
     unique_id = Column(String, nullable=False)

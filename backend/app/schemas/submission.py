@@ -26,11 +26,11 @@ class SubmissionManual(SubmissionBase):
     
 class SubmissionDelete(BaseModel):
     """Fields for deleting a submission entry"""
-    submission_id: int
+    submission_unique_id: str
     
 class SubmissionEdit(BaseModel):
     """Fields for editing an existing submission"""
-    submission_unique_id: int
+    submission_unique_id: str
     edit_text: str
     
 # -- RESPONSE MODELS    
@@ -39,7 +39,6 @@ class SubmissionResponseBase(BaseModel):
     """Base fields for all submission responses"""
     id: int
     status: str
-    orig_text_prev: Optional[str] = None
     action_needed: bool
     manual_upload: bool
     tokens_used: int
@@ -50,26 +49,29 @@ class SubmissionResponseBase(BaseModel):
         
 class SubmissionResponse(SubmissionResponseBase):
     """Basic response for general use"""
+    unique_id: UUID4
     meets_requirements: bool
-    failure_reason: Optional[str] = None
-    completed_processing_at: Optional[datetime] = None
-    message: Optional[str] = None
+    orig_text: str
+    edit_text: Optional[str] = None
+    temp_text: Optional[str] = Field(None, max_length=10000)
+    ai_result: dict
+    plag_result: dict
+    edited: bool
+    page_link: Optional[str] = None
+    domain: Optional[str] = None
+    function_pref: str
     
 class SubmissionDetailResponse(SubmissionResponse):
     """Detailed response for admin/owner views"""
-    unique_id: UUID4
-    orig_text: str
-    edit_text: Optional[str] = None
-    ai_result: dict
-    plag_result: dict
-    domain: Optional[str] = None
-    page_link: Optional[str] = None
-    edited: bool
+    api_key_id: int
+    owner_id: int
+    failure_reason: Optional[str] = None
+    completed_processing_at: Optional[datetime] = None
+    message: Optional[str] = None
     edited_at: Optional[datetime] = None
-    function_pref: str
-    temp_text: Optional[str] = Field(None, max_length=10000)
     
 class SubmissionHookResponse(BaseModel):
     """Response for webhook, owners save this data"""
     watermark_id: int
     temp_text: str
+    orig_text: str
