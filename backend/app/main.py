@@ -1,27 +1,19 @@
 import math
 import secrets
-from typing import List, Optional, Union
+from typing import List, Union
 import uuid
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, BackgroundTasks, status, Header
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import UUID4
 from sqlalchemy.orm import Session
-from sqlalchemy import UUID, func
-import asyncio
-import time
 import logging
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
-from passlib.context import CryptContext
-from urllib.parse import urlparse
 import requests
 import os
 import json
 import stripe
-import base64
 from jose import jwe
 
 from .db.database import get_db
@@ -32,15 +24,16 @@ from .models.submission import Submission, ProcessingStatus
 from .models.watermark import Watermark
 from .models.payment import Payment
 from .models.event import Event
-from .schemas.owner import LoginRequest, OwnerJwt, PlanCancel, Token, PasswordReset, PasswordUpdate, OwnerCreate, OwnerUpdate, SettingsUpdate, PlanUpdate, TokenPurchase, OwnerResponse, OwnerDetailResponse
-from .schemas.verified_site import SiteSimpleResponse, SiteDetailResponse
+from .schemas.owner import LoginRequest, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
+from .schemas.verified_site import SiteSimpleResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionDelete, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.watermark import WatermarkCreate
-from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, PaymentResponse, SubscriptionUpdate
+from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
+PAGE_LIMIT = 10
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
@@ -347,7 +340,7 @@ def ai_analysis(text: str):
     }
 
 # -- PLAGIARISM ANALYSIS
-def plag_analysis(text: str, owner_pref: str = "auto_cite"):
+def plag_analysis(text: str, owner_pref: str):
     winston_url = "https://api.gowinston.ai/v2/plagiarism"
     key = os.getenv("WINST_KEY")
     
@@ -374,9 +367,7 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
         
     if response["status"] == 200 and response["result"]["score"] >= 80:
         if response["result"]["sourceCounts"] > 0:
-            if owner_pref == "auto_cite":
-                result = auto_cite(text, response["sources"])
-            elif owner_pref == "ai_rewrite":
+            if owner_pref == "ai_rewrite":
                 result = ai_rewrite(text)
             elif owner_pref == "redact":
                 result = redact_text(text, response["sources"])
@@ -391,7 +382,8 @@ def plag_analysis(text: str, owner_pref: str = "auto_cite"):
         "tokens": response["credits_used"]
     }
 
-# -- AUTO-CITATION
+# -- AUTO-CITATION -- FOR FUTURE
+'''
 def auto_cite(text: str, sources: list):
     """
     Auto-cite multiple sources in the text, avoiding overlapping citations.
@@ -440,6 +432,7 @@ def auto_cite(text: str, sources: list):
         "modif_text": cited_text,
         "citations": citations
     }
+'''
 
 # -- AI REWRITE
 def ai_rewrite(text: str):
@@ -1262,7 +1255,6 @@ async def get_owner_submissions(
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
-    limit = 10
     
     # Build query
     query = db.query(Submission).filter(Submission.owner_id == owner.id)
@@ -1272,7 +1264,7 @@ async def get_owner_submissions(
         query = query.filter(Submission.status == status)
     
     # Get submissions with pagination
-    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
 
     # Return list response
     return [
@@ -1346,7 +1338,6 @@ async def get_submissions_action(
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
-    limit = 10
 
     # Build query
     query = db.query(Submission).filter(Submission.owner_id == owner.id)
@@ -1359,7 +1350,7 @@ async def get_submissions_action(
         )
     
     # Get submissions with pagination
-    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
     
     # Return list response
     return [
@@ -2018,8 +2009,12 @@ async def stripe_listener(
     
     # -- INVOICE-FAILED WEBHOOK
     if event_type == "invoice.payment_failed":
-        print(data)
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to create invoice"
+        )
         
+    # -- PAYMENT-SUCCEEDED WEBHOOK
     if event_type == "payment_intent.succeeded":
 
         if data:

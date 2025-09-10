@@ -87,8 +87,7 @@ class Owner(Base):
     
     # Settings
     function_pref = Column(JSON, nullable=False, default=lambda: {
-        "auto_cite": True,
-        "ai_rewrite": False,
+        "ai_rewrite": True,
         "redact": False
     })
     ui_pref = Column(JSON, nullable=False, default=lambda : {
