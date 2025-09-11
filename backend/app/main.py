@@ -34,6 +34,7 @@ from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDe
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
 PAGE_LIMIT = 10
+TRIAL_LENGTH = 7
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
@@ -303,7 +304,7 @@ def validate_jwt(
         return owner
     except Exception as e:
         print(f"JWE Decryption Error: {e}")
-    
+
 
 # ---------- ANALYSIS FUNCTIONS ----------
 
@@ -450,8 +451,6 @@ def ai_rewrite(text: str):
             Output only the text.
         """
     )
-
-    print(response)
 
     return { 
         "modif_text": response.output_text,
@@ -608,7 +607,9 @@ async def get_owner_details(
         customer_id=owner.customer_id,
         subscription_id=owner.subscription_id,
         session_ids=owner.session_ids,
-        is_private=owner.is_private
+        is_private=owner.is_private,
+        claimed_trial=owner.claimed_trial,
+        trial_used=owner.trial_used
     )
 
 # -- DEACTIVATE/DELETE OWNER
@@ -850,6 +851,17 @@ async def delete_payment_method(
             detail="Failed to delete payment method"
         )
         
+@app.put("/api/v1/owners/claim-trial")
+async def claim_trial(
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """Claim free trial"""
+    owner.claimed_trial = True
+    db.commit()
+    
+    return
+
 
 # ---------- SITE ENDPOINTS ----------
 
@@ -1661,10 +1673,13 @@ async def _handle_invoice_created(db, data):
         print("Failed to save invoice_pdf: ", e)
         
     payment.status = "complete"
+    owner.trial_used = True
     if not owner.is_verified:
+        # New subscription
         owner.change_plan(payment.price_id)
         owner.verify_owner(cancelled=False)
     else:
+        # Recurring payment
         if not data_obj.get("billing_reason") == "manual":
             owner.add_monthly_tokens()
 
@@ -1821,11 +1836,11 @@ async def create_payment_session(
             "customer_update": {
                 "address": "auto",
                 "name": "auto"
-            }
+            },
+            
         }
         
         if request.payment_type == "subscription":
-            print(1)
             try:
                 price = stripe.Price.retrieve(request.price_id)
                 if price.type != "recurring":
@@ -1848,12 +1863,13 @@ async def create_payment_session(
                     }
                 ],
                 "subscription_data": {
+                    "trial_period_days": 7 if owner.claimed_trial and not owner.trial_used else None,
                     "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id},
                 },
                 "saved_payment_method_options": {
                     "payment_method_save": "enabled"
                 },
-                "payment_method_collection": "if_required"
+                "payment_method_collection": "always"
             })
         else:
             if not request.price_id:

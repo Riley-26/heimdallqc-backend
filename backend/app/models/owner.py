@@ -76,6 +76,8 @@ class Owner(Base):
     company = Column(String(200), nullable=True)
     
     # Account status
+    claimed_trial = Column(Boolean, default=False)
+    trial_used = Column(Boolean, default=False)
     customer_id = Column(String(255), nullable=True)
     is_private = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)

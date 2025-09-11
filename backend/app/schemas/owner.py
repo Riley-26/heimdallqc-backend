@@ -107,6 +107,8 @@ class OwnerResponse(OwnerBase):
 
 class OwnerDetailResponse(OwnerResponse):
     """Detailed owner response with preferences"""
+    claimed_trial: bool
+    trial_used: bool
     domain_id: int
     verified_month_end: Optional[datetime] = None
     plan: dict
