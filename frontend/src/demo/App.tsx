@@ -8,16 +8,6 @@ function App() {
         id: 1,
         plagResult: 40,
         aiResult: 65,
-        citations: {
-            "H0": {
-                "title": "yeah",
-                "link": "hello"
-            },
-            "H1": {
-                "title": "yeah2",
-                "link": "hello2"
-            }
-        }
     }
 
     const { HMDLWidget, widgetState, widgetActions, HMDLWatermark, isLoading, error } =

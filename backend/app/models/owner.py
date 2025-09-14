@@ -97,6 +97,8 @@ class Owner(Base):
         "watermarks": True
     })
     ai_threshold_option = Column(Integer, nullable=False, default=60)
+    low_tokens_option = Column(Boolean, nullable=False, default=True)
+    tokens_threshold = Column(Integer, nullable=False, default=500)
     
     # Usage tracking
     current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)
@@ -170,8 +172,6 @@ class Owner(Base):
             now = datetime.now()
             self.is_verified = True
             self.verified_at = now
-            # Set month end to 30 days from now
-            self.verified_month_end = now + timedelta(days=30)
         else:
             self.is_verified = False
             

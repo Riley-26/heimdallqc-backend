@@ -22,7 +22,7 @@ class PasswordUpdate(BaseModel):
     """Password update with token"""
     email: str
     token: str
-    new_password: str = Field(..., min_length=8)
+    new_password: str
 
 
 # -- INPUT SCHEMAS
@@ -48,11 +48,16 @@ class OwnerUpdate(BaseModel):
     company: Optional[str] = None
 
 class SettingsUpdate(BaseModel):
-    """Update owner preferences"""
+    """Update owner settings"""
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=40, le=99)
     privacy_mode: bool
+    
+class EmailPrefsUpdate(BaseModel):
+    """Update owner email preferences"""
+    low_tokens_option: Dict[str, bool]
+    tokens_threshold: Dict[str, int]
 
 class PlanUpdate(BaseModel):
     """Update plan"""
@@ -115,6 +120,8 @@ class OwnerDetailResponse(OwnerResponse):
     function_pref: dict
     ui_pref: dict
     ai_threshold_option: int
+    tokens_threshold: int
+    low_tokens_option: bool
     created_at: datetime
     updated_at: datetime
     verified_at: Optional[datetime] = None

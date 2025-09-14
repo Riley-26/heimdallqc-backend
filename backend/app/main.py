@@ -15,6 +15,8 @@ import os
 import json
 import stripe
 from jose import jwe
+import resend
+from jinja2 import Template
 
 from .db.database import get_db
 from .models.owner import Owner
@@ -24,7 +26,7 @@ from .models.submission import Submission, ProcessingStatus
 from .models.watermark import Watermark
 from .models.payment import Payment
 from .models.event import Event
-from .schemas.owner import LoginRequest, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
+from .schemas.owner import EmailPrefsUpdate, LoginRequest, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionDelete, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
@@ -38,6 +40,7 @@ TRIAL_LENGTH = 7
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
+resend.api_key = os.getenv("RESEND_KEY")
 
 # Create FastAPI application
 app = FastAPI(
@@ -184,7 +187,6 @@ async def process_text(text: str, owner_pref: str) -> dict:
         "text": text
     }
 
-# Background processing function
 async def process_submission_background(submission_id: int):
     """Process submission in background after timeout"""
     from .db.database import SessionLocal
@@ -305,6 +307,86 @@ def validate_jwt(
     except Exception as e:
         print(f"JWE Decryption Error: {e}")
 
+def render_action_needed_email(base_url: str):
+    html_template = """
+    <html>
+      <body>
+        <div style="padding: 20px; background-color: #222; font-family: Arial;">
+          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Action needed</h1>
+          <p style="color: #ccc; fontSize: 16px; marginBottom: 24px;">A submitted text in your website has been flagged as containing plagiarism. Please go to your account and make necessary modifications.</p>
+          <a href="{{ base_url }}/account"
+             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+            My Account
+          </a>
+        </div>
+      </body>
+    </html>
+    """
+    template = Template(html_template)
+    return template.render(base_url=base_url)
+
+def render_payment_conf_email(invoice_pdf: str, base_url: str):
+    html_template = """
+    <html>
+      <body>
+        <div style="padding: 20px; background-color: #222; font-family: Arial;">
+          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Thank you for your payment!</h1>
+          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">To view your invoice, please click the link below or go to the "billing" section of your account.</p>
+          <a href="{{ invoice_pdf }}"
+             style="background-color: #222; color: #fff; font-size: 16px; margin-bottom: 12px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+            Invoice PDF
+          </a>
+          <a href="{{ base_url }}/account/billing"
+             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+            My Account
+          </a>
+          <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
+        </div>
+      </body>
+    </html>
+    """
+    template = Template(html_template)
+    return template.render(invoice_pdf=invoice_pdf, base_url=base_url)
+
+def render_low_tokens_email(current: int, bill_cycle: str, base_url: str):
+    html_template = """
+    <html>
+      <body>
+        <div style="padding: 20px; background-color: #222; font-family: Arial;">
+          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Low Tokens: {{ current }}</h1>
+          <p style="color: #ccc; font-size: 16px; margin-bottom: 16px;">Tokens are below the threshold. Buy some extra tokens, or hold out until your next billing cycle there is enough time. Submissions will not be saved if tokens run out.</p>
+          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
+          <a href="{{ base_url }}/account/billing"
+             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+            My Account
+          </a>
+          <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
+        </div>
+      </body>
+    </html>
+    """
+    template = Template(html_template)
+    return template.render(current=current, bill_cycle=bill_cycle, base_url=base_url)
+
+def render_no_tokens_email(bill_cycle: str, base_url: str):
+    html_template = """
+    <html>
+      <body>
+        <div style="padding: 20px; background-color: #222; font-family: Arial;">
+          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">No Tokens Remaining</h1>
+          <p style="color: #ccc; font-size: 16px; margin-bottom: 16px;">A submission has failed due to insufficient tokens. You should purchase more, or wait until the next billing cycle.</p>
+          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
+          <a href="{{ base_url }}/account/billing"
+             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+            My Account
+          </a>
+          <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
+        </div>
+      </body>
+    </html>
+    """
+    template = Template(html_template)
+    return template.render(bill_cycle=bill_cycle, base_url=base_url)
 
 # ---------- ANALYSIS FUNCTIONS ----------
 
@@ -601,6 +683,8 @@ async def get_owner_details(
         function_pref=owner.function_pref,
         ui_pref=owner.ui_pref,
         ai_threshold_option=owner.ai_threshold_option,
+        tokens_threshold=owner.tokens_threshold,
+        low_tokens_option=owner.low_tokens_option,
         created_at=owner.created_at,
         updated_at=owner.updated_at,
         verified_at=owner.verified_at,
@@ -739,6 +823,22 @@ async def update_settings(
         "status": "Updated preferences successfully"
     }
 
+@app.patch("/api/v1/owners/save-email-prefs")
+async def save_email_prefs(
+    request: EmailPrefsUpdate,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """Save owner's email preferences"""
+    owner.low_tokens_option = request.low_tokens_option["low_tokens_option"]
+    owner.tokens_threshold = request.tokens_threshold["tokens_threshold"]
+    
+    db.commit()
+    
+    return {
+        "status": "Updated preferences successfully"
+    }
+
 @app.patch("/api/v1/forgot-password")
 async def forgot_password(
     request: PasswordReset,
@@ -762,10 +862,10 @@ async def forgot_password(
     owner.token_expiration = expires_at
     db.commit()
     
-    print(send_reset_email(request.email, reset_token))
-    
     return {
-        "message": message
+        "message": message,
+        "email": request.email,
+        "token": reset_token
     }
 
 @app.patch("/api/v1/reset-password")
@@ -1005,9 +1105,6 @@ async def create_submission(
             checked_pref = i
             break
     if owner.current_tokens <= 0:
-        
-        # SEND EMAIL
-        
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
     # Create submission record
@@ -1050,7 +1147,18 @@ async def create_submission(
             
         # Delete if insufficient tokens
         if res_tokens > owner.current_tokens:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "No Tokens Remaining",
+                "html": render_no_tokens_email(bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            resend.Emails.send(email_params)
+            
+            owner.current_tokens = 0
+            
             db.delete(submission)
+            db.commit()
             return None
                 
         # Start updating submission entry
@@ -1071,8 +1179,31 @@ async def create_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             
         db.commit()
+        
+        # -- EMAIL - LOW TOKENS
+        if owner.low_tokens_option and owner.current_tokens <= owner.tokens_threshold:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Low Tokens",
+                "html": render_low_tokens_email(current=owner.current_tokens, bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            
+            resend.Emails.send(email_params)
             
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
+            
+            # -- PLAGIARISM DETECTED
+            
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Plagiarism Detected - Action Needed",
+                "html": render_action_needed_email(base_url=os.getenv("BASE_URL"))
+            }
+            
+            resend.Emails.send(email_params)
+            
             submission.update_action(True)
             submission.meets_requirements = True
             owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
@@ -1086,8 +1217,7 @@ async def create_submission(
             db.commit()
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
-                submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
-                submission.meets_requirements = False
+                db.delete(submission)
             else:
                 submission.meets_requirements = True
         
@@ -1104,18 +1234,19 @@ async def create_submission(
         
     # Create watermark once everything is completed
     try:
-        if data:
-            watermark = await _create_watermark(db, data)
-        
-        if watermark:
-            owner.watermarks_made = owner.watermarks_made + 1
-            db.commit()
+        if not owner.is_private:
+            if data:
+                watermark = _create_watermark(db, data)
             
-            return SubmissionHookResponse(
-                watermark_id=watermark.id,
-                temp_text=submission.temp_text,
-                orig_text=submission.orig_text
-            )
+            if watermark:
+                owner.watermarks_made = owner.watermarks_made + 1
+                db.commit()
+                
+                return SubmissionHookResponse(
+                    watermark_id=watermark.id,
+                    temp_text=submission.temp_text,
+                    orig_text=submission.orig_text
+                )
     except Exception as e:
         return {
             "status": "completed",
@@ -1144,9 +1275,6 @@ async def upload_submission(
             checked_pref = i
             break
     if owner.current_tokens <= 0:
-        
-        # SEND EMAIL
-        
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
     # Create submission record
@@ -1186,7 +1314,18 @@ async def upload_submission(
             
         # Delete if insufficient tokens
         if res_tokens > owner.current_tokens:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Insufficient Tokens",
+                "html": render_no_tokens_email(bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            resend.Emails.send(email_params)
+            
+            owner.current_tokens = 0
+            
             db.delete(submission)
+            db.commit()
             return None
         
         # Start updating submission entry
@@ -1207,24 +1346,46 @@ async def upload_submission(
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             
         db.commit()
+        
+        # -- EMAIL - LOW TOKENS
+        if owner.low_tokens_option and owner.current_tokens <= owner.tokens_threshold:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Low Tokens",
+                "html": render_low_tokens_email(current=owner.current_tokens, bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            
+            resend.Emails.send(email_params)
             
         # Plag score must meet criteria
         if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
+            
+            # -- PLAGIARISM DETECTED
+            
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Plagiarism Detected - Action Needed",
+                "html": render_action_needed_email(base_url=os.getenv("BASE_URL"))
+            }
+            
+            resend.Emails.send(email_params)
+            
             submission.update_action(True)
             submission.meets_requirements = True
             owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
+            
             data = {
                 "owner_id": owner.id,
                 "submission_id": submission.id,
                 "ai_score": ai_res["score"],
-                "plag_score": plag_res["score"],
-                "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
+                "plag_score": plag_res["score"]
             }
             db.commit()
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
-                submission.update_status(ProcessingStatus.FAILED, "AI score below threshold")
-                submission.meets_requirements = False
+                db.delete(submission)
             else:
                 submission.meets_requirements = True
         
@@ -1241,18 +1402,19 @@ async def upload_submission(
     
     # Create watermark once everything is completed
     try:
-        if data:
-            watermark = await _create_watermark(db, data)
-        
-        if watermark:
-            owner.watermarks_made = owner.watermarks_made + 1
-            db.commit()
+        if not owner.is_private:
+            if data:
+                watermark = _create_watermark(db, data)
             
-            return SubmissionHookResponse(
-                watermark_id=watermark.id,
-                temp_text=submission.temp_text,
-                orig_text=submission.orig_text
-            )
+            if watermark:
+                owner.watermarks_made = owner.watermarks_made + 1
+                db.commit()
+                
+                return SubmissionHookResponse(
+                    watermark_id=watermark.id,
+                    temp_text=submission.temp_text,
+                    orig_text=submission.orig_text
+                )
     except Exception as e:
         return {
             "status": "completed",
@@ -1451,7 +1613,8 @@ async def edit_submission(
     
     return
 
-async def _create_watermark(db, req=WatermarkCreate):
+def _create_watermark(db, req=WatermarkCreate):
+    """Create watermark based on submission"""
     
     watermark = Watermark(
         owner_id=req["owner_id"],
@@ -1630,8 +1793,9 @@ async def _handle_invoice_created(db, data):
     main_data = data.get("data")
     data_obj = main_data.get("object")
     customer_id = data_obj.get("customer")
-    owner_unique_id = data_obj.get("lines").get("data")[0].get("metadata").get("owner_unique_id") or data_obj.get("metadata").get("owner_unique_id")
-    unique_id = data_obj.get("lines").get("data")[0].get("metadata").get("unique_id") or data_obj.get("metadata").get("unique_id")
+    lines_data = data_obj.get("lines").get("data")[0]
+    owner_unique_id = lines_data.get("metadata").get("owner_unique_id") or data_obj.get("metadata").get("owner_unique_id")
+    unique_id = lines_data.get("metadata").get("unique_id") or data_obj.get("metadata").get("unique_id")
 
     # Idempotency check
     is_already_processed = await _handle_idempotency_check(db, data.get("id"), data.get("type"), customer_id)
@@ -1666,14 +1830,30 @@ async def _handle_invoice_created(db, data):
         
         if invoice_pdf:
             payment.invoice_pdf = invoice_pdf
+            
             db.commit()
+            
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Payment Confirmation",
+                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, base_url=os.getenv("BASE_URL"))
+            }
+            
+            resend.Emails.send(email_params)
         else:
             raise Exception
     except Exception as e:
         print("Failed to save invoice_pdf: ", e)
         
     payment.status = "complete"
-    owner.trial_used = True
+    if owner.claimed_trial:
+        owner.trial_used = True
+        
+    period_end_seconds = lines_data.get("period").get("end")
+    if period_end_seconds:
+        owner.verified_month_end = datetime.fromtimestamp(period_end_seconds, tz=timezone.utc)
+        
     if not owner.is_verified:
         # New subscription
         owner.change_plan(payment.price_id)
@@ -1837,7 +2017,6 @@ async def create_payment_session(
                 "address": "auto",
                 "name": "auto"
             },
-            
         }
         
         if request.payment_type == "subscription":
@@ -2053,6 +2232,7 @@ async def stripe_listener(
         owner.change_plan("none")
         owner.verify_owner(cancelled=True)
         owner.subscription_id = ""
+        owner.verified_month_end = None
         
         db.commit()
     
