@@ -93,8 +93,7 @@ class Owner(Base):
         "redact": False
     })
     ui_pref = Column(JSON, nullable=False, default=lambda : {
-        "widget": True,
-        "watermarks": True
+        "widget": True
     })
     ai_threshold_option = Column(Integer, nullable=False, default=60)
     low_tokens_option = Column(Boolean, nullable=False, default=True)
@@ -103,7 +102,6 @@ class Owner(Base):
     # Usage tracking
     current_tokens = Column(Integer, default=plans_dict["None"]["tokens"], nullable=False)
     tokens_used = Column(Integer, default=0, nullable=False)
-    watermarks_made = Column(Integer, default=0, nullable=False)
     plagiarisms_prevented = Column(Integer, default=0, nullable=False)
     entries_needing_action = Column(Integer, default=0, nullable=False)
     texts_analysed = Column(Integer, default=0, nullable=False)
@@ -116,7 +114,6 @@ class Owner(Base):
     # Relationships
     api_keys = relationship("ApiKey", back_populates="owner", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="owner")
-    watermarks = relationship("Watermark", back_populates="owner")
     payments = relationship("Payment", back_populates="owner")
 
     def __repr__(self):

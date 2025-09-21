@@ -12,12 +12,14 @@ class SubmissionBase(BaseModel):
     
 # -- INPUT MODELS
     
-class SubmissionAuto(SubmissionBase):
+class SubmissionAuto(BaseModel):
     """Fields required when API creates a new submission"""
+    orig_text: str
+    work_id: str
     question_result: bool
-    manual_upload: bool = False
     domain: str
     page_link: str
+    webhook_url: str
 
 class SubmissionManual(SubmissionBase):
     """Fields required when manually uploading"""
@@ -47,9 +49,18 @@ class SubmissionResponseBase(BaseModel):
     class Config:
         field_attributes = True
         
+class SubmissionCreated(BaseModel):
+    """For when a submission is created via API (not manual upload)"""
+    status: int
+    message: str
+    orig_text: Optional[str] = None
+    modif_text: Optional[str] = None
+    work_id: Optional[str] = None
+        
 class SubmissionResponse(SubmissionResponseBase):
     """Basic response for general use"""
     unique_id: UUID4
+    work_id: Optional[str] = None
     meets_requirements: bool
     orig_text: str
     edit_text: Optional[str] = None
@@ -69,9 +80,3 @@ class SubmissionDetailResponse(SubmissionResponse):
     completed_processing_at: Optional[datetime] = None
     message: Optional[str] = None
     edited_at: Optional[datetime] = None
-    
-class SubmissionHookResponse(BaseModel):
-    """Response for webhook, owners save this data"""
-    watermark_id: int
-    temp_text: str
-    orig_text: str

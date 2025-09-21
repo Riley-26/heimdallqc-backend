@@ -36,6 +36,7 @@ class Submission(Base):
     manual_upload = Column(Boolean, nullable=False)
     
     # Processing
+    work_id = Column(String(44), nullable=True)
     status = Column(String(50), default=ProcessingStatus.PENDING, index=True)
     meets_requirements = Column(Boolean, nullable=False)
     failure_reason = Column(String(500), nullable=True)
@@ -59,7 +60,6 @@ class Submission(Base):
     # Relationships
     owner = relationship("Owner", back_populates="submissions")
     api_key_obj = relationship("ApiKey", back_populates="submissions")
-    watermark = relationship("Watermark", back_populates="submission", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Submission(id={self.id}, status={self.status}, owner_id={self.owner_id})>"

@@ -18,19 +18,17 @@ from jose import jwe
 import resend
 from jinja2 import Template
 
-from .db.database import get_db
+from .db.database import SessionLocal, get_db
 from .models.owner import Owner
 from .models.verified_site import VerifiedSite
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
-from .models.watermark import Watermark
 from .models.payment import Payment
 from .models.event import Event
 from .schemas.owner import EmailPrefsUpdate, LoginRequest, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.verified_site import SiteSimpleResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
-from .schemas.submission import SubmissionAuto, SubmissionDelete, SubmissionEdit, SubmissionHookResponse, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
-from .schemas.watermark import WatermarkCreate
+from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
 
 # !!!! DO NOT TOUCH
@@ -90,7 +88,6 @@ async def site_status():
         "e_package": status_types["functioning"],
         "i_package": status_types["functioning"],
         "verif_checker": status_types["functioning"],
-        "watermarking": status_types["functioning"],
         "contact": status_types["functioning"],
     }
     
@@ -148,25 +145,29 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ---------- PROCESSING/HELPER FUNCTIONS ----------
 
 # Helper function to authenticate API key
-async def authenticate_api_key(api_key: str, db: Session) -> ApiKey:
+async def authenticate_api_key(api_key: str) -> ApiKey:
     """Authenticate and return the API key object"""
-    api_key_obj = db.query(ApiKey).filter(
-        ApiKey.key == api_key,
-        ApiKey.is_active == True
-    ).first()
-    
-    if not api_key_obj:
-        raise HTTPException(status_code=401, detail="Invalid or inactive API key")
-    
-    # Update last used timestamp
-    api_key_obj.last_used_at = datetime.now()
-    api_key_obj.total_requests += 1
-    db.commit()
-    
-    return api_key_obj
+    db = SessionLocal()
+    try:
+        api_key_obj = db.query(ApiKey).filter(
+            ApiKey.key == api_key,
+            ApiKey.is_active == True
+        ).first()
+        
+        if not api_key_obj:
+            raise HTTPException(status_code=401, detail="Invalid or inactive API key")
+        
+        # Update last used timestamp
+        api_key_obj.last_used_at = datetime.now()
+        api_key_obj.total_requests += 1
+        db.commit()
+        
+        return api_key_obj
+    finally:
+        db.close()
 
 # Text processing function
-async def process_text(text: str, owner_pref: str) -> dict:
+async def process_text(text: str, owner_pref: str, checked_state: bool = False) -> dict:
     """
     Process the submitted text and determine if it meets requirements.
     
@@ -176,53 +177,21 @@ async def process_text(text: str, owner_pref: str) -> dict:
     Returns:
         Dict with processed results and validation status
     """
-    
     # ANALYSIS
-    ai_result = ai_analysis(text)
     plag_result = plag_analysis(text, owner_pref)
+    ai_result = {
+        "status": 200,
+        "score": 100,
+        "tokens": 0
+    }
+    if not checked_state:
+        ai_result = ai_analysis(text)
     
     return {
         "ai_result": ai_result,
         "plag_result": plag_result,
         "text": text
     }
-
-async def process_submission_background(submission_id: int):
-    """Process submission in background after timeout"""
-    from .db.database import SessionLocal
-    
-    db = SessionLocal()
-    try:
-        submission = db.query(Submission).filter(Submission.id == submission_id).first()
-        if not submission or submission.is_completed:
-            return
-        
-        # Update status to processing
-        submission.update_status(ProcessingStatus.PROCESSING)
-        db.commit()
-        
-        # Process without time pressure
-        try:
-            processing_result = await process_text(submission.orig_text, )
-            
-            # Update submission with results
-            submission.processing_result = processing_result
-            submission.meets_requirements = processing_result.get("meets_requirements", False)
-            
-            if submission.meets_requirements:
-                submission.update_status(ProcessingStatus.SUCCESS)
-            else:
-                submission.update_status(ProcessingStatus.FAILED, "Text does not meet requirements")
-            
-        except Exception as e:
-            submission.update_status(ProcessingStatus.FAILED, f"Background processing error: {str(e)}")
-        
-        db.commit()
-        
-    except Exception as e:
-        print(f"Background processing error for submission {submission_id}: {e}")
-    finally:
-        db.close()
 
 async def get_current_owner(
     db: Session,
@@ -647,7 +616,6 @@ async def get_owner(
         is_verified=owner.is_verified,
         current_tokens=owner.current_tokens,
         tokens_used=owner.tokens_used,
-        watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
         texts_analysed=owner.texts_analysed,
@@ -673,7 +641,6 @@ async def get_owner_details(
         is_verified=owner.is_verified,
         current_tokens=owner.current_tokens,
         tokens_used=owner.tokens_used,
-        watermarks_made=owner.watermarks_made,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
         texts_analysed=owner.texts_analysed,
@@ -1085,17 +1052,27 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions/create-submission")
+@app.post("/api/v1/submissions/create-submission", response_model=SubmissionCreated)
 async def create_submission(
     submission_data: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header),
+    internal_auth: str = Header(None, alias="Internal-Auth"),
     db: Session = Depends(get_db)
 ):
     """
     Create a new submission and process it.
     """
-    # Authenticate API key
-    api_key_obj = await authenticate_api_key(api_key, db)
+    # Check for internal authentication (bypass API key check if internal)
+    if internal_auth and internal_auth == os.getenv("INTERNAL_SECRET"):
+        api_key_obj = db.query(ApiKey).filter(
+            ApiKey.key == api_key,
+            ApiKey.is_active == True
+        ).first()
+        if not api_key_obj:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    else:
+        # External request - authenticate API key normally
+        api_key_obj = await authenticate_api_key(api_key)
     
     owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
     if not owner:
@@ -1105,7 +1082,10 @@ async def create_submission(
             checked_pref = i
             break
     if owner.current_tokens <= 0:
-        raise HTTPException(status_code=400, detail="No tokens remaining")
+        return {
+            "status": 500,
+            "message": "Insufficient tokens"
+        }
     
     # Create submission record
     submission = Submission(
@@ -1114,11 +1094,12 @@ async def create_submission(
         orig_text=submission_data.orig_text,
         orig_text_length=len(submission_data.orig_text),
         question_result=submission_data.question_result,
-        manual_upload=submission_data.manual_upload,
+        manual_upload=False,
         status=ProcessingStatus.PENDING,
-        meets_requirements=submission_data.meets_requirements,
-        action_needed=submission_data.action_needed,
+        meets_requirements=False,
+        action_needed=False,
         function_pref=checked_pref,
+        work_id=submission_data.work_id,
         domain=submission_data.domain,
         page_link=submission_data.page_link
     )
@@ -1133,7 +1114,7 @@ async def create_submission(
         owner.texts_analysed = owner.texts_analysed + 1
         db.commit()
         
-        processing_result = await process_text(submission_data.orig_text, checked_pref)
+        processing_result = await process_text(submission_data.orig_text, checked_pref, submission_data.question_result)
         
         ai_res = processing_result["ai_result"]
         plag_res = processing_result["plag_result"]
@@ -1159,7 +1140,11 @@ async def create_submission(
             
             db.delete(submission)
             db.commit()
-            return None
+            
+            return {
+                "status": 500,
+                "message": "Insufficient tokens"
+            }
                 
         # Start updating submission entry
         submission.ai_result = ai_res
@@ -1171,8 +1156,9 @@ async def create_submission(
         owner.tokens_used = owner.tokens_used + res_tokens
         
         if submission.meets_requirements:
-            if "modif_text" in plag_res["result"].keys():
-                submission.temp_text = plag_res["result"]["modif_text"]
+            if "result" in plag_res.keys():
+                if "modif_text" in plag_res["result"].keys():
+                    submission.temp_text = plag_res["result"]["modif_text"]
                 
             submission.update_status(ProcessingStatus.SUCCESS)
         else:
@@ -1207,13 +1193,7 @@ async def create_submission(
             submission.update_action(True)
             submission.meets_requirements = True
             owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
-            data = {
-                "owner_id": owner.id,
-                "submission_id": submission.id,
-                "ai_score": ai_res["score"],
-                "plag_score": plag_res["score"],
-                "citations": plag_res["result"]["citations"] if "citations" in plag_res["result"].keys() else None
-            }
+            
             db.commit()
         else:    
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
@@ -1224,33 +1204,23 @@ async def create_submission(
         db.commit()
         db.refresh(submission)
         
+        return {
+            "status": 200,
+            "message": "Successfully created submission",
+            "orig_text": submission_data.orig_text,
+            "modif_text": submission.temp_text,
+            "work_id": submission_data.work_id
+        }
+        
     except Exception as e:
         submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
         db.commit()
         
         return {
-            "status": "failed"
-        }
-        
-    # Create watermark once everything is completed
-    try:
-        if not owner.is_private:
-            if data:
-                watermark = _create_watermark(db, data)
-            
-            if watermark:
-                owner.watermarks_made = owner.watermarks_made + 1
-                db.commit()
-                
-                return SubmissionHookResponse(
-                    watermark_id=watermark.id,
-                    temp_text=submission.temp_text,
-                    orig_text=submission.orig_text
-                )
-    except Exception as e:
-        return {
-            "status": "completed",
-            "watermark_status": "failed"
+            "status": 500,
+            "message": "Failed to analyse text",
+            "orig_text": submission_data.orig_text,
+            "work_id": submission_data.work_id
         }
 
 @app.post("/api/v1/submissions/upload-submission")
@@ -1400,25 +1370,9 @@ async def upload_submission(
             "status": "failed"
         }
     
-    # Create watermark once everything is completed
-    try:
-        if not owner.is_private:
-            if data:
-                watermark = _create_watermark(db, data)
-            
-            if watermark:
-                owner.watermarks_made = owner.watermarks_made + 1
-                db.commit()
-                
-                return SubmissionHookResponse(
-                    watermark_id=watermark.id,
-                    temp_text=submission.temp_text,
-                    orig_text=submission.orig_text
-                )
     except Exception as e:
         return {
-            "status": "completed",
-            "watermark_status": "failed"
+            "status": "completed"
         }
 
 @app.get("/api/v1/submissions/self", response_model=List[SubmissionResponse])
@@ -1450,6 +1404,7 @@ async def get_owner_submissions(
             tokens_used=sub.tokens_used,
             created_at=sub.created_at,
             unique_id=sub.unique_id,
+            work_id=sub.work_id,
             meets_requirements=sub.meets_requirements,
             orig_text=sub.orig_text,
             edit_text=sub.edit_text,
@@ -1487,6 +1442,7 @@ async def get_submission_detailed(
         tokens_used=submission.tokens_used,
         created_at=submission.created_at,
         unique_id=submission.unique_id,
+        work_id=submission.work_id,
         meets_requirements=submission.meets_requirements,
         orig_text=submission.orig_text,
         edit_text=submission.edit_text,
@@ -1536,6 +1492,7 @@ async def get_submissions_action(
             tokens_used=sub.tokens_used,
             created_at=sub.created_at,
             unique_id=sub.unique_id,
+            work_id=sub.work_id,
             meets_requirements=sub.meets_requirements,
             orig_text=sub.orig_text,
             edit_text=sub.edit_text,
@@ -1612,27 +1569,6 @@ async def edit_submission(
     db.commit()
     
     return
-
-def _create_watermark(db, req=WatermarkCreate):
-    """Create watermark based on submission"""
-    
-    watermark = Watermark(
-        owner_id=req["owner_id"],
-        submission_id=req["submission_id"],
-        ai_score=req["ai_score"],
-        plag_score=req["plag_score"],
-        citations=req["citations"]
-    )
-    
-    db.add(watermark)
-    db.commit()
-    db.refresh(watermark)
-    
-    return watermark
-
-# -- GET WATERMARKS
-
-# -- DELETE WATERMARK
 
 
 # ---------- LOG IN ENDPOINTS ----------

@@ -105,7 +105,6 @@ class OwnerResponse(OwnerBase):
     """Standard owner response with usage data"""
     current_tokens: int
     tokens_used: int
-    watermarks_made: int
     plagiarisms_prevented: int
     entries_needing_action: int
     texts_analysed: int
