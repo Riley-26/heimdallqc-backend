@@ -28,7 +28,7 @@ async def public_analyse(
     # Call your main backend internally (server-to-server)
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            "http://127.0.0.1:8000/api/v1/submissions/create-submission",  # Internal call
+            "https://meticulous-blessing-production.up.railway.app/api/v1/submissions/create-submission",  # Internal call
             json=request.model_dump(),
             headers={
                 "Internal-Auth": os.getenv("INTERNAL_SECRET"),
