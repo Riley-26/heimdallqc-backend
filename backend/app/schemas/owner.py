@@ -46,13 +46,16 @@ class OwnerUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
     company: Optional[str] = None
+    
+class OwnerDelete(BaseModel):
+    """Delete owner data"""
+    password: str
 
 class SettingsUpdate(BaseModel):
     """Update owner settings"""
     function_pref: Dict[str, bool]
     ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=40, le=99)
-    privacy_mode: bool
     
 class EmailPrefsUpdate(BaseModel):
     """Update owner email preferences"""
@@ -96,7 +99,6 @@ class OwnerBase(BaseModel):
     company: Optional[str] = None
     is_active: bool
     is_verified: bool
-    is_private: bool
 
     class Config:
         from_attributes = True
@@ -113,7 +115,6 @@ class OwnerDetailResponse(OwnerResponse):
     """Detailed owner response with preferences"""
     claimed_trial: bool
     trial_used: bool
-    domain_id: int
     verified_month_end: Optional[datetime] = None
     plan: dict
     function_pref: dict

@@ -20,13 +20,11 @@ from jinja2 import Template
 
 from .db.database import SessionLocal, get_db
 from .models.owner import Owner
-from .models.verified_site import VerifiedSite
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
 from .models.payment import Payment
 from .models.event import Event
-from .schemas.owner import EmailPrefsUpdate, LoginRequest, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
-from .schemas.verified_site import SiteSimpleResponse
+from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
@@ -87,8 +85,7 @@ async def site_status():
     status = {
         "e_package": status_types["functioning"],
         "i_package": status_types["functioning"],
-        "verif_checker": status_types["functioning"],
-        "contact": status_types["functioning"],
+        "contact": status_types["functioning"]
     }
     
     return status
@@ -574,18 +571,13 @@ async def create_owner(
     if existing_owner:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    verified_site = await create_verif_site(request.domain, db)
-    if not verified_site:
-        raise HTTPException(status_code=404, detail="Cannot verify site")
-    
     # Create new owner
     owner = Owner(
         email=request.email,
         domain=request.domain,
         password_hash=hash_password(request.password),
         name=request.name,
-        company=request.company,
-        domain_id=verified_site.id
+        company=request.company
     )
     
     db.add(owner)
@@ -618,8 +610,7 @@ async def get_owner(
         tokens_used=owner.tokens_used,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
-        texts_analysed=owner.texts_analysed,
-        is_private=owner.is_private
+        texts_analysed=owner.texts_analysed
     )
     
 @app.get("/api/v1/owners/self/detailed", response_model=OwnerDetailResponse)
@@ -644,7 +635,6 @@ async def get_owner_details(
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
         texts_analysed=owner.texts_analysed,
-        domain_id=owner.domain_id,
         verified_month_end=owner.verified_month_end,
         plan=owner.plan,
         function_pref=owner.function_pref,
@@ -658,12 +648,54 @@ async def get_owner_details(
         customer_id=owner.customer_id,
         subscription_id=owner.subscription_id,
         session_ids=owner.session_ids,
-        is_private=owner.is_private,
         claimed_trial=owner.claimed_trial,
         trial_used=owner.trial_used
     )
 
 # -- DEACTIVATE/DELETE OWNER
+@app.delete("/api/v1/owners/delete-account")
+async def delete_owner(
+    request: OwnerDelete,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """Delete owner's data"""
+    try:
+        if verify_password(request.password, owner.password_hash):
+            if owner.customer_id:
+                # Delete Stripe customer
+                customer = stripe.Customer.retrieve(owner.customer_id)
+                
+                if customer:
+                    stripe.Customer.delete(owner.customer_id)
+            
+            # Delete all data
+            payments = db.query(Payment).filter(Payment.customer_id == owner.customer_id).all()
+            submissions = db.query(Submission).filter(Submission.owner_id == owner.id).all()
+            api_keys = db.query(ApiKey).filter(ApiKey.owner_id == owner.id).all()
+            all_data = payments + submissions + api_keys
+            
+            for i in all_data:
+                db.delete(i)
+                
+            db.delete(owner)
+            db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Incorrect password"
+            )
+    except Exception as e:
+        print(e)
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to delete data"
+        )
+    
+    return {
+        "status": 200,
+        "message": "Successfully deleted user"
+    }
 
 # -- GET PLAN USAGE
 
@@ -782,7 +814,6 @@ async def update_settings(
     owner.function_pref = request.function_pref
     owner.ui_pref = request.ui_pref
     owner.ai_threshold_option = request.ai_threshold_option
-    owner.is_private = request.privacy_mode
     
     db.commit()
     
@@ -928,50 +959,6 @@ async def claim_trial(
     db.commit()
     
     return
-
-
-# ---------- SITE ENDPOINTS ----------
-
-@app.get("/api/v1/verif-sites/{site_link}", response_model=Union[SiteSimpleResponse, None])
-async def check_verified_site(
-    site_link: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Check if site is verified
-    """
-    verif_site = db.query(VerifiedSite).filter(VerifiedSite.domain == site_link).first()
-    if not verif_site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    owner = db.query(Owner).filter(Owner.domain_id == verif_site.id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner not found")
-    
-    if owner.is_private:
-        return None
-    
-    return SiteSimpleResponse(
-        domain=verif_site.domain,
-        id=verif_site.id,
-        is_active=verif_site.is_active
-    )
-
-async def create_verif_site(domain, db):
-    """
-    Create a verified site
-    """
-    
-    # ----- CHECK SITE VALIDITY -----
-    
-    verif_site = VerifiedSite(
-        domain=domain
-    )
-    
-    db.add(verif_site)
-    db.commit()
-    db.refresh(verif_site)
-    
-    return verif_site
 
 # ---------- API KEY ENDPOINTS ----------
 

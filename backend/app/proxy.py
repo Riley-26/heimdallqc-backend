@@ -17,15 +17,13 @@ app.add_middleware(
 )
 
 @app.post("/analyse")
-async def public_analyse(
+async def analyse(
     request: SubmissionAuto,
     api_key: str = Depends(get_api_key_from_header)
 ):
-    # Validate API key
     if not await authenticate_api_key(api_key):
         raise HTTPException(401, "Invalid API key")
     
-    # Call your main backend internally (server-to-server)
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             "https://meticulous-blessing-production.up.railway.app/api/v1/submissions/create-submission",  # Internal call
