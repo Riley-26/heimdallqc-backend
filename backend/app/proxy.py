@@ -23,19 +23,24 @@ async def analyse(
 ):
     if not await authenticate_api_key(api_key):
         raise HTTPException(401, "Invalid API key")
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            "https://meticulous-blessing-production.up.railway.app/api/v1/submissions/create-submission",  # Internal call
-            json=request.model_dump(),
-            headers={
-                "Internal-Auth": os.getenv("INTERNAL_SECRET"),
-                "Authorization": f"Bearer {api_key}"
-            }
-        )
-    return response.json()
+        try:
+            response = await client.post(
+                f"{os.getenv('BASE_API_URL')}/api/v1/submissions/create-submission",  # Internal call
+                json=request.model_dump(),
+                headers={
+                    "Internal-Auth": os.getenv("INTERNAL_SECRET"),
+                    "Authorization": f"Bearer {api_key}"
+                }
+            )
+            response.raise_for_status()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="An error occurred")
+        
+    return
 
 if __name__ == "__main__":
     import uvicorn
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

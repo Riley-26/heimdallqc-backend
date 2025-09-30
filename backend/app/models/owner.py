@@ -72,6 +72,7 @@ class Owner(Base):
     company = Column(String(200), nullable=True)
     
     # Account status
+    cancelled_plan = Column(Boolean, default=False)
     claimed_trial = Column(Boolean, default=False)
     trial_used = Column(Boolean, default=False)
     customer_id = Column(String(255), nullable=True)

@@ -34,6 +34,7 @@ class SubmissionEdit(BaseModel):
     """Fields for editing an existing submission"""
     submission_unique_id: str
     edit_text: str
+    rescan: bool
     
 # -- RESPONSE MODELS    
 
@@ -53,9 +54,9 @@ class SubmissionCreated(BaseModel):
     """For when a submission is created via API (not manual upload)"""
     status: int
     message: str
-    orig_text: Optional[str] = None
-    modif_text: Optional[str] = None
-    work_id: Optional[str] = None
+    text: Optional[str] = None
+    modifiedText: Optional[str] = None
+    workId: Optional[str] = None
         
 class SubmissionResponse(SubmissionResponseBase):
     """Basic response for general use"""

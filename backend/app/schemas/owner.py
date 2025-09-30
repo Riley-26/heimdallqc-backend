@@ -99,6 +99,7 @@ class OwnerBase(BaseModel):
     company: Optional[str] = None
     is_active: bool
     is_verified: bool
+    cancelled_plan: bool
 
     class Config:
         from_attributes = True
@@ -107,6 +108,7 @@ class OwnerResponse(OwnerBase):
     """Standard owner response with usage data"""
     current_tokens: int
     tokens_used: int
+    plan: dict
     plagiarisms_prevented: int
     entries_needing_action: int
     texts_analysed: int
@@ -116,7 +118,6 @@ class OwnerDetailResponse(OwnerResponse):
     claimed_trial: bool
     trial_used: bool
     verified_month_end: Optional[datetime] = None
-    plan: dict
     function_pref: dict
     ui_pref: dict
     ai_threshold_option: int
