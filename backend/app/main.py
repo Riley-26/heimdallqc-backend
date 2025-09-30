@@ -33,6 +33,7 @@ from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDe
 MARKUP_FACTOR = 15
 PAGE_LIMIT = 10
 TRIAL_LENGTH = 7
+PLAG_THRESHOLD = 60
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
@@ -164,7 +165,7 @@ async def authenticate_api_key(api_key: str) -> ApiKey:
         db.close()
 
 # Text processing function
-async def process_text(text: str, owner_pref: str, checked_state: bool = False) -> dict:
+def process_text(text: str, owner_pref: str = "", checked_state: bool = False):
     """
     Process the submitted text and determine if it meets requirements.
     
@@ -273,13 +274,15 @@ def validate_jwt(
     except Exception as e:
         print(f"JWE Decryption Error: {e}")
 
-def render_action_needed_email(base_url: str):
+def render_action_needed_email(base_url: str, work_id: str):
     html_template = """
     <html>
       <body>
         <div style="padding: 20px; background-color: #222; font-family: Arial;">
           <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Action needed</h1>
           <p style="color: #ccc; fontSize: 16px; marginBottom: 24px;">A submitted text in your website has been flagged as containing plagiarism. Please go to your account and make necessary modifications.</p>
+          <br/>
+          <p style="color: #ccc; fontSize: 16px; marginBottom: 24px;">Submission's Work ID: {{ work_id }}</p>
           <a href="{{ base_url }}/account"
              style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             My Account
@@ -289,7 +292,7 @@ def render_action_needed_email(base_url: str):
     </html>
     """
     template = Template(html_template)
-    return template.render(base_url=base_url)
+    return template.render(base_url=base_url,work_id=work_id)
 
 def render_payment_conf_email(invoice_pdf: str, base_url: str):
     html_template = """
@@ -606,8 +609,10 @@ async def get_owner(
         company=owner.company,
         is_active=owner.is_active,
         is_verified=owner.is_verified,
+        cancelled_plan=owner.cancelled_plan,
         current_tokens=owner.current_tokens,
         tokens_used=owner.tokens_used,
+        plan=owner.plan,
         plagiarisms_prevented=owner.plagiarisms_prevented,
         entries_needing_action=owner.entries_needing_action,
         texts_analysed=owner.texts_analysed
@@ -630,6 +635,7 @@ async def get_owner_details(
         company=owner.company,
         is_active=owner.is_active,
         is_verified=owner.is_verified,
+        cancelled_plan=owner.cancelled_plan,
         current_tokens=owner.current_tokens,
         tokens_used=owner.tokens_used,
         plagiarisms_prevented=owner.plagiarisms_prevented,
@@ -776,7 +782,7 @@ async def cancel_plan(
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):  
-    """Cancel owners subscription, providing a refund of the unused amount. Must have an active subscription."""
+    """Cancel owners subscription. Must have an active subscription."""
     try:
         subscription = stripe.Subscription.retrieve(owner.subscription_id)
         
@@ -793,12 +799,14 @@ async def cancel_plan(
         )
         message = "Subscription will cancel at the end of the current plan"
         
+        owner.cancelled_plan = True
+        db.commit()
+        
         return {
             "message": message
         }
     
     except stripe.error.StripeError as e:
-        print(e)
         raise HTTPException(
             status_code=400,
             detail="Failed to cancel subscription"
@@ -1039,9 +1047,173 @@ async def deactivate_api_key(
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
-@app.post("/api/v1/submissions/create-submission", response_model=SubmissionCreated)
+from fastapi import BackgroundTasks
+
+def process_submission(owner_id, submission_id, text, work_id, webhook_url="", function_pref="", question_result=False):
+    """Background function for processing submission"""
+    db = SessionLocal()
+    try:
+        owner = db.query(Owner).filter(Owner.id == owner_id).first()
+        submission = db.query(Submission).filter(Submission.id == submission_id).first()
+        
+        if not owner or not submission:
+            print("Owner or submission not found")
+            return
+        
+        processing_result = process_text(text, function_pref, question_result)
+        
+        # Update owner stats
+        owner.texts_analysed = owner.texts_analysed + 1
+        db.commit()
+        
+        # Set results
+        ai_res = processing_result["ai_result"]
+        plag_res = processing_result["plag_result"]
+        res_tokens = 0
+        
+        # Set tokens, scaled using markup factor
+        if "tokens" in ai_res.keys():
+            res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
+        if "tokens" in plag_res.keys():
+            res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
+            
+        # Delete if insufficient tokens, send email
+        if res_tokens > owner.current_tokens:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "No Tokens Remaining",
+                "html": render_no_tokens_email(bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            resend.Emails.send(email_params)
+            
+            owner.current_tokens = 0
+            
+            db.delete(submission)
+            db.commit()
+            
+            return SubmissionCreated(
+                status=500,
+                message="Insufficient tokens"
+            )
+            
+        # Start updating submission entry
+        submission.ai_result = ai_res
+        submission.plag_result = plag_res
+        submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
+        submission.tokens_used = submission.tokens_used + res_tokens
+        
+        # Update owner stats
+        owner.current_tokens = owner.current_tokens - res_tokens
+        owner.tokens_used = owner.tokens_used + res_tokens
+        
+        # Check if submission should be saved
+        modified_text = None
+        
+        if submission.meets_requirements:
+            # Save modified text, plag score is high
+            if "result" in plag_res.keys():
+                if "modif_text" in plag_res["result"].keys():
+                    modified_text = plag_res["result"]["modif_text"]
+                    submission.temp_text = modified_text
+                
+            submission.update_status(ProcessingStatus.SUCCESS)
+        else:
+            submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
+            
+        db.commit()
+            
+        # Plagiarism detected, send email
+        if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
+            """
+            
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Plagiarism Detected - Action Needed",
+                "html": render_action_needed_email(base_url=os.getenv("BASE_URL"),work_id=work_id)
+            }
+            resend.Emails.send(email_params)
+            """
+            
+            submission.update_action(True)
+            submission.meets_requirements = True
+            owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
+            
+            db.commit()
+        else:    
+            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
+                db.delete(submission)
+            else:
+                submission.meets_requirements = True
+                
+                if submission.action_needed:
+                    submission.action_needed = False
+        
+        db.commit()
+        
+        # Send email if low tokens - tokens fallen below owner's set threshold
+        if owner.low_tokens_option and owner.current_tokens <= owner.tokens_threshold:
+            email_params: resend.Emails.sendParams = {
+                "from": "no-reply@heimdallqc.com",
+                "to": [owner.email],
+                "subject": "Low Tokens",
+                "html": render_low_tokens_email(current=owner.current_tokens, bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
+            }
+            resend.Emails.send(email_params)
+        
+        # Call webhook, everything is good
+        try:
+            if webhook_url:
+                response = requests.post(
+                    webhook_url,
+                    json={
+                        "status": 200,
+                        "message": "Results successfully received" if modified_text else "No results received",
+                        "work_id": work_id,
+                        "text": text,
+                        "modified_text": modified_text
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="Cannot send data to webhook")
+        
+        return {
+            "status": 200
+        }
+        
+    except Exception as e:
+        submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
+        db.commit()
+        
+        # Call webhook, error processing text
+        try:
+            if webhook_url:
+                response = requests.post(
+                    webhook_url,
+                    json={
+                        "status": 500,
+                        "message": "Failed to process text",
+                        "work_id": work_id,
+                        "text": text,
+                        "modified_text": None
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail="Cannot send data to webhook")
+
+        return {
+            "status": 500
+        }
+
+@app.post("/api/v1/submissions/create-submission")
 async def create_submission(
     submission_data: SubmissionAuto,
+    background_tasks: BackgroundTasks,
     api_key: str = Depends(get_api_key_from_header),
     internal_auth: str = Header(None, alias="Internal-Auth"),
     db: Session = Depends(get_db)
@@ -1061,6 +1233,7 @@ async def create_submission(
         # External request - authenticate API key normally
         api_key_obj = await authenticate_api_key(api_key)
     
+    # Get owner's preferred modif function
     owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
@@ -1068,11 +1241,18 @@ async def create_submission(
         if owner.function_pref[i] == True:
             checked_pref = i
             break
+        
+    # Cannot process if no tokens
     if owner.current_tokens <= 0:
-        return {
-            "status": 500,
-            "message": "Insufficient tokens"
-        }
+        # Just in case
+        if not owner.current_tokens == 0:
+            owner.current_tokens = 0
+            db.commit()
+        
+        return SubmissionCreated(
+            status=500,
+            message="Insufficient tokens"
+        )
     
     # Create submission record
     submission = Submission(
@@ -1082,7 +1262,7 @@ async def create_submission(
         orig_text_length=len(submission_data.orig_text),
         question_result=submission_data.question_result,
         manual_upload=False,
-        status=ProcessingStatus.PENDING,
+        status=ProcessingStatus.PROCESSING,
         meets_requirements=False,
         action_needed=False,
         function_pref=checked_pref,
@@ -1095,120 +1275,9 @@ async def create_submission(
     db.commit()
     db.refresh(submission)
     
-    try:
-        # Update status to processing
-        submission.update_status(ProcessingStatus.PROCESSING)
-        owner.texts_analysed = owner.texts_analysed + 1
-        db.commit()
-        
-        processing_result = await process_text(submission_data.orig_text, checked_pref, submission_data.question_result)
-        
-        ai_res = processing_result["ai_result"]
-        plag_res = processing_result["plag_result"]
-        res_tokens = 0
-        
-        # Set tokens, scaled using markup factor
-        if "tokens" in ai_res.keys():
-            res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
-        if "tokens" in plag_res.keys():
-            res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
-            
-        # Delete if insufficient tokens
-        if res_tokens > owner.current_tokens:
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "No Tokens Remaining",
-                "html": render_no_tokens_email(bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
-            }
-            resend.Emails.send(email_params)
-            
-            owner.current_tokens = 0
-            
-            db.delete(submission)
-            db.commit()
-            
-            return {
-                "status": 500,
-                "message": "Insufficient tokens"
-            }
-                
-        # Start updating submission entry
-        submission.ai_result = ai_res
-        submission.plag_result = plag_res
-        submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
-        
-        submission.tokens_used = submission.tokens_used + res_tokens
-        owner.current_tokens = owner.current_tokens - res_tokens
-        owner.tokens_used = owner.tokens_used + res_tokens
-        
-        if submission.meets_requirements:
-            if "result" in plag_res.keys():
-                if "modif_text" in plag_res["result"].keys():
-                    submission.temp_text = plag_res["result"]["modif_text"]
-                
-            submission.update_status(ProcessingStatus.SUCCESS)
-        else:
-            submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            
-        db.commit()
-        
-        # -- EMAIL - LOW TOKENS
-        if owner.low_tokens_option and owner.current_tokens <= owner.tokens_threshold:
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "Low Tokens",
-                "html": render_low_tokens_email(current=owner.current_tokens, bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
-            }
-            
-            resend.Emails.send(email_params)
-            
-        if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
-            
-            # -- PLAGIARISM DETECTED
-            
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "Plagiarism Detected - Action Needed",
-                "html": render_action_needed_email(base_url=os.getenv("BASE_URL"))
-            }
-            
-            resend.Emails.send(email_params)
-            
-            submission.update_action(True)
-            submission.meets_requirements = True
-            owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
-            
-            db.commit()
-        else:    
-            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
-                db.delete(submission)
-            else:
-                submission.meets_requirements = True
-        
-        db.commit()
-        db.refresh(submission)
-        
-        return {
-            "status": 200,
-            "message": "Successfully created submission",
-            "orig_text": submission_data.orig_text,
-            "modif_text": submission.temp_text,
-            "work_id": submission_data.work_id
-        }
-        
-    except Exception as e:
-        submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
-        db.commit()
-        
-        return {
-            "status": 500,
-            "message": "Failed to analyse text",
-            "orig_text": submission_data.orig_text,
-            "work_id": submission_data.work_id
-        }
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.webhook_url, submission_data.orig_text, submission_data.work_id, checked_pref, submission_data.question_result)
+    
+    return
 
 @app.post("/api/v1/submissions/upload-submission")
 async def upload_submission(
@@ -1244,7 +1313,8 @@ async def upload_submission(
         status=ProcessingStatus.PENDING,
         meets_requirements=submission_data.meets_requirements,
         action_needed=submission_data.action_needed,
-        function_pref=checked_pref
+        function_pref=checked_pref,
+        work_id=f"hmdl-wk-{uuid.uuid4()}"
     )
     
     db.add(submission)
@@ -1447,6 +1517,43 @@ async def get_submission_detailed(
         edited_at=submission.edited_at
     )
    
+@app.get("/api/v1/submissions/work_id/{work_id}")
+async def get_submission_by_workid(
+    work_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get detailed submission info using API key and work ID."""
+    # Get submission and verify ownership
+    submission = db.query(Submission).filter(
+        Submission.work_id == work_id
+    ).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    return {
+        "id": submission.id,
+        "owner_id": submission.owner_id,
+        "status": submission.status,
+        "action_needed": submission.action_needed,
+        "manual_upload": submission.manual_upload,
+        "tokens_used": submission.tokens_used,
+        "created_at": submission.created_at,
+        "work_id": submission.work_id,
+        "meets_requirements": submission.meets_requirements,
+        "orig_text": submission.orig_text,
+        "edit_text": submission.edit_text,
+        "temp_text": submission.temp_text,
+        "ai_result": submission.ai_result,
+        "plag_result": submission.plag_result,
+        "edited": submission.edited,
+        "page_link": submission.page_link,
+        "domain": submission.domain,
+        "function_pref": submission.function_pref,
+        "failure_reason": submission.failure_reason,
+        "completed_processing_at": submission.completed_processing_at,
+        "edited_at": submission.edited_at
+    }
+   
 @app.get("/api/v1/submissions/self/action-needed", response_model=List[SubmissionResponse])
 async def get_submissions_action(
     page: int = Query(1, ge=1),
@@ -1534,6 +1641,7 @@ async def delete_submission(
 @app.patch("/api/v1/submissions/edit-submission")
 async def edit_submission(
     request: SubmissionEdit,
+    background_tasks: BackgroundTasks,
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1544,14 +1652,13 @@ async def edit_submission(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
+    # Rescan for plagiarism
+    if request.rescan:
+        background_tasks.add_task(process_submission, owner.id, submission.id, request.edit_text, submission.work_id)
+        
     submission.edit_text = request.edit_text
     submission.edited = True
     submission.edited_at = datetime.now()
-    
-    # Handles sub if ACTION_NEEDED is True
-    if submission.action_needed:
-        # RESCAN FOR PLAGIARISM
-        pass
     
     db.commit()
     
@@ -2156,11 +2263,21 @@ async def stripe_listener(
         owner.verify_owner(cancelled=True)
         owner.subscription_id = ""
         owner.verified_month_end = None
+        owner.cancelled_plan = False
         
         db.commit()
     
     return
 
+
+@app.post("/yello")
+async def yelo(request: Request):
+    
+    print("yello: ")
+    data = await request.json()
+    print(data)
+    
+    return
     
 if __name__ == "__main__":
     import uvicorn
