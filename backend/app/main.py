@@ -85,7 +85,10 @@ async def site_status():
     
     status = {
         "e_package": status_types["functioning"],
-        "i_package": status_types["functioning"],
+        "i_package": status_types["error"],
+        "emailing": status_types["functioning"],
+        "analysis": status_types["functioning"],
+        "webhook": status_types["functioning"],
         "contact": status_types["functioning"]
     }
     
