@@ -821,7 +821,6 @@ async def update_settings(
 ):
     """Updates all of the owner's settings"""
     owner.function_pref = request.function_pref
-    owner.ui_pref = request.ui_pref
     owner.ai_threshold_option = request.ai_threshold_option
     
     db.commit()
