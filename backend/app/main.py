@@ -412,14 +412,14 @@ def plag_analysis(text: str, owner_pref: str):
     result = {}
     tokens = 0
 
-    if "status" not in response.keys():
+    if "status" not in response.keys() or "result" not in response.keys():
         return {
             "status": 400,
             "score": "N/A",
             "result": {},
             "tokens": 0
         }
-        
+
     if response["status"] == 200 and response["result"]["score"] >= 80:
         if response["result"]["sourceCounts"] > 0:
             if owner_pref == "ai_rewrite":
@@ -1278,7 +1278,7 @@ async def create_submission(
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.webhook_url, submission_data.orig_text, submission_data.work_id, checked_pref, submission_data.question_result)
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, submission_data.work_id, submission_data.webhook_url, checked_pref, submission_data.question_result)
     
     return
 
