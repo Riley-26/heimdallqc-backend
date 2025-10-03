@@ -38,8 +38,8 @@ async def analyse(
                     "Authorization": f"Bearer {api_key}"
                 }
             )
-            response.raise_for_status()
             print(response)
+            response.raise_for_status()
         except Exception as e:
             raise HTTPException(status_code=400, detail="An error occurred")
         
