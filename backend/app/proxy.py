@@ -16,6 +16,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def health():
+    return {"status": "ok"}
+
 @app.post("/analyse")
 async def analyse(
     request: SubmissionAuto,
