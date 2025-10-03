@@ -410,7 +410,6 @@ def plag_analysis(text: str, owner_pref: str):
     
     response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
     result = {}
-    tokens = 0
 
     if "status" not in response.keys() or "result" not in response.keys():
         return {
@@ -427,8 +426,8 @@ def plag_analysis(text: str, owner_pref: str):
             elif owner_pref == "redact":
                 result = redact_text(text, response["sources"])
                 
-            if "tokens" in result.keys():
-                tokens += result["tokens"]
+            if "sources" in response.keys():
+                result["sources"] = response["sources"]
     
     return {
         "status": response["status"],

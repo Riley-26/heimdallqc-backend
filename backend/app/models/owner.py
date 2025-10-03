@@ -88,9 +88,6 @@ class Owner(Base):
         "ai_rewrite": True,
         "redact": False
     })
-    ui_pref = Column(JSON, nullable=False, default=lambda : {
-        "widget": True
-    })
     ai_threshold_option = Column(Integer, nullable=False, default=60)
     low_tokens_option = Column(Boolean, nullable=False, default=True)
     tokens_threshold = Column(Integer, nullable=False, default=500)

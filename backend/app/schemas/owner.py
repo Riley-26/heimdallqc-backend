@@ -54,7 +54,6 @@ class OwnerDelete(BaseModel):
 class SettingsUpdate(BaseModel):
     """Update owner settings"""
     function_pref: Dict[str, bool]
-    ui_pref: Dict[str, bool]
     ai_threshold_option: int = Field(ge=40, le=99)
     
 class EmailPrefsUpdate(BaseModel):
