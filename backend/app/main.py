@@ -646,7 +646,6 @@ async def get_owner_details(
         verified_month_end=owner.verified_month_end,
         plan=owner.plan,
         function_pref=owner.function_pref,
-        ui_pref=owner.ui_pref,
         ai_threshold_option=owner.ai_threshold_option,
         tokens_threshold=owner.tokens_threshold,
         low_tokens_option=owner.low_tokens_option,

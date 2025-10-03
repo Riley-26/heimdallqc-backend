@@ -118,7 +118,6 @@ class OwnerDetailResponse(OwnerResponse):
     trial_used: bool
     verified_month_end: Optional[datetime] = None
     function_pref: dict
-    ui_pref: dict
     ai_threshold_option: int
     tokens_threshold: int
     low_tokens_option: bool
