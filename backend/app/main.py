@@ -1137,8 +1137,6 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             
         # Plagiarism detected, send email
         if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
-            """
-            
             email_params: resend.Emails.sendParams = {
                 "from": "no-reply@heimdallqc.com",
                 "to": [owner.email],
@@ -1146,7 +1144,6 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
                 "html": render_action_needed_email(base_url=os.getenv("BASE_URL"),work_id=work_id)
             }
             resend.Emails.send(email_params)
-            """
             
             submission.update_action(True)
             submission.meets_requirements = True
