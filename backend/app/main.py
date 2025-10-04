@@ -204,15 +204,16 @@ async def get_current_owner(
     
     if not owner_unique_id and not customer_id:
         raise HTTPException(status_code=400, detail="Either owner_unique_id or customer_id must be provided")
+    if customer_id:
+        owner = db.query(Owner).filter(Owner.customer_id == customer_id).first()
+        if owner:
+            return owner
     if owner_unique_id:
         owner = db.query(Owner).filter(Owner.unique_id == owner_unique_id).first()
         if not owner:
             raise HTTPException(status_code=404, detail="Owner not found")
-    else:
-        owner = db.query(Owner).filter(Owner.customer_id == customer_id).first()
-        if not owner:
-            raise HTTPException(status_code=404, detail="Owner not found")
-    return owner
+        return owner
+    return None
 
 async def get_payment(
     db: Session,
@@ -228,13 +229,14 @@ async def get_payment(
             Payment.owner_unique_id == owner_unique_id,
             Payment.unique_id == unique_id
         ).first()
-        if not payment:
-            raise HTTPException(status_code=400, detail="Payment item not found")
-    else:
+        if payment:
+            return payment
+    if subscription_id:
         payment = db.query(Payment).filter(Payment.subscription_id == subscription_id).first()
         if not payment:
             raise HTTPException(status_code=400, detail="Payment item not found")
-    return payment
+        return payment
+    return None
 
 def convert_unique_id(unique_id: str):
     """Converts owner unique_id from string to UUID4 type"""
@@ -1750,10 +1752,11 @@ async def _handle_invoice_created(db, data):
     # Fetch database entries
     try:
         print(owner_unique_id)
-        owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
-        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
+        owner = await get_current_owner(db, owner_unique_id=owner_unique_id, customer_id=customer_id)
+        payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id, subscription_id=owner.subscription_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
+        
         
     # Save "invoice_id"
     try:
