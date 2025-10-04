@@ -56,7 +56,7 @@ class PaymentListResponse(BaseModel):
     amount: int
     status: str
     created_at: datetime
-    pdf_link: Optional[str] = None
+    receipt_url: Optional[str] = None
     
 class PaymentMethodListResponse(BaseModel):
     """Payment methods listed response"""

@@ -287,13 +287,13 @@ def render_action_needed_email(base_url: str, work_id: str):
         <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
             <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
-        <div style="padding: 20px; background-color: #222; font-family: Arial;">
-          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Action needed</h1>
-          <p style="color: #ccc; fontSize: 16px; marginBottom: 24px;">A submitted text in your website has been flagged as containing plagiarism. Please go to your account and make necessary modifications.</p>
+        <div style="padding: 20px; font-family: Arial;">
+          <h1 style="color: #111; font-size: 28px; margin-bottom: 16px;">Action needed</h1>
+          <p style="color: #333; fontSize: 16px; marginBottom: 24px;">A submitted text in your website has been flagged as containing plagiarism. Please go to your account and make necessary modifications.</p>
           <br/>
-          <p style="color: #ccc; fontSize: 16px; marginBottom: 24px;">Submission's Work ID: {{ work_id }}</p>
+          <p style="color: #333; fontSize: 16px; marginBottom: 24px;">Submission's Work ID: {{ work_id }}</p>
           <a href="{{ base_url }}/account"
-             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+             style="color: #111; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             My Account
           </a>
         </div>
@@ -303,22 +303,31 @@ def render_action_needed_email(base_url: str, work_id: str):
     template = Template(html_template)
     return template.render(base_url=base_url,work_id=work_id)
 
-def render_payment_conf_email(invoice_pdf: str, base_url: str):
+def render_payment_conf_email(invoice_pdf: str, paid: str, name: str, base_url: str):
     html_template = """
     <html>
       <body>
         <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
             <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
-        <div style="padding: 20px; background-color: #222; font-family: Arial;">
-          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Thank you for your payment!</h1>
-          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">To view your invoice, please click the link below or go to the "billing" section of your account.</p>
+        <div style="padding: 20px; font-family: Arial;">
+          <h1 style="color: #111; font-size: 28px; margin-bottom: 16px;">Thank you for your payment!</h1>
+          <p style="color: #333; font-size: 16px; margin-bottom: 24px;">To view your invoice, please click the link below or go to the "billing" section of your account.</p>
+          <div style="padding: 20px; background-color: #ddd; display: flex; flex-direction: column; gap: 12px;">
+            <div style="padding: 20px; display: flex; justify-content: space-between;">
+              <p style="color: #333; font-size: 16px;">{{ name }}</p>
+            </div>
+            <div style="padding: 20px; display: flex; justify-content: space-between;">
+              <p style="color: #333; font-size: 16px;">Total paid:</p>
+              <p style="color: #333; font-size: 16px;">{{ paid }}</p>
+            </div>
+          </div>
           <a href="{{ invoice_pdf }}"
-             style="background-color: #222; color: #fff; font-size: 16px; margin-bottom: 12px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+             style="color: #111; font-size: 16px; margin-bottom: 12px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             Invoice PDF
           </a>
           <a href="{{ base_url }}/account/billing"
-             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+             style="color: #111; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             My Account
           </a>
           <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
@@ -327,7 +336,7 @@ def render_payment_conf_email(invoice_pdf: str, base_url: str):
     </html>
     """
     template = Template(html_template)
-    return template.render(invoice_pdf=invoice_pdf, base_url=base_url)
+    return template.render(invoice_pdf=invoice_pdf, paid=paid, name=name, base_url=base_url)
 
 def render_low_tokens_email(current: int, bill_cycle: str, base_url: str):
     html_template = """
@@ -336,12 +345,12 @@ def render_low_tokens_email(current: int, bill_cycle: str, base_url: str):
         <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
             <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
-        <div style="padding: 20px; background-color: #222; font-family: Arial;">
-          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Low Tokens: {{ current }}</h1>
-          <p style="color: #ccc; font-size: 16px; margin-bottom: 16px;">Tokens are below the threshold. Buy some extra tokens, or hold out until your next billing cycle there is enough time. Submissions will not be saved if tokens run out.</p>
-          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
+        <div style="padding: 20px; font-family: Arial;">
+          <h1 style="color: #111; font-size: 28px; margin-bottom: 16px;">Low Tokens: {{ current }}</h1>
+          <p style="color: #333; font-size: 16px; margin-bottom: 16px;">Tokens are below the threshold. Buy some extra tokens, or hold out until your next billing cycle there is enough time. Submissions will not be saved if tokens run out.</p>
+          <p style="color: #333; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
           <a href="{{ base_url }}/account/billing"
-             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+             style="color: #111; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             My Account
           </a>
           <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
@@ -359,12 +368,12 @@ def render_no_tokens_email(bill_cycle: str, base_url: str):
         <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
             <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
-        <div style="padding: 20px; background-color: #222; font-family: Arial;">
-          <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">No Tokens Remaining</h1>
-          <p style="color: #ccc; font-size: 16px; margin-bottom: 16px;">A submission has failed due to insufficient tokens. You should purchase more, or wait until the next billing cycle.</p>
-          <p style="color: #ccc; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
+        <div style="padding: 20px; font-family: Arial;">
+          <h1 style="color: #111; font-size: 28px; margin-bottom: 16px;">No Tokens Remaining</h1>
+          <p style="color: #333; font-size: 16px; margin-bottom: 16px;">A submission has failed due to insufficient tokens. You should purchase more, or wait until the next billing cycle.</p>
+          <p style="color: #333; font-size: 16px; margin-bottom: 24px;">Next bill: {{ bill_cycle }}</p>
           <a href="{{ base_url }}/account/billing"
-             style="background-color: #222; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
+             style="color: #111; font-size: 16px; padding: 12px 24px; border-radius: 6px; text-decoration: none; margin-bottom: 24px; border: none; display: inline-block;">
             My Account
           </a>
           <p style="color: #888; font-size: 14px;">If you have any questions, please email us at support@heimdallqc.com</p>
@@ -721,34 +730,34 @@ async def delete_owner(
 
 # -- GET PLAN USAGE
 
-@app.get("/api/v1/owners/invoices/self", response_model=Union[List[PaymentListResponse], None])
-async def get_owner_invoices(
+@app.get("/api/v1/owners/payments/self", response_model=Union[List[PaymentListResponse], None])
+async def get_owner_payments(
     owner: Owner = Depends(validate_jwt)
 ):
-    """Return list of owner's invoices for display"""
+    """Return list of owner's payments for display"""
     if not owner.customer_id:
         return None
     try:
         # Subscriptions
-        invoices = stripe.Invoice.list(
+        payments = stripe.Charge.list(
             customer=owner.customer_id
         )
         
-        invoice_list = [
+        payment_list = [
             PaymentListResponse(
-                amount=invoice.total,
-                status=invoice.status,
-                created_at=invoice.created,
-                pdf_link=invoice.invoice_pdf
+                amount=payment.amount,
+                status=payment.status,
+                created_at=payment.created,
+                receipt_url=payment.receipt_url
             )
-            for invoice in invoices.data if invoice.status == "paid"
+            for payment in payments.data if payment.paid == True
         ]
         
-        return invoice_list
+        return payment_list
     except stripe.error.StripeError:
         raise HTTPException(
             status_code=400,
-            detail="Failed to retrieve invoices"
+            detail="Failed to retrieve payments"
         )
     
 @app.patch("/api/v1/owners/update-plan")
@@ -1781,7 +1790,7 @@ async def _handle_invoice_created(db, data):
                 "from": "no-reply@heimdallqc.com",
                 "to": [owner.email],
                 "subject": "Payment Confirmation",
-                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, base_url=os.getenv("BASE_URL"))
+                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, paid=data_obj.get("amount_due"), name=lines_data.get("description"), base_url=os.getenv("BASE_URL"))
             }
             
             resend.Emails.send(email_params)
