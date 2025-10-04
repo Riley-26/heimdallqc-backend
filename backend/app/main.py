@@ -1791,7 +1791,9 @@ async def _handle_invoice_created(db, data):
         print("Failed to save invoice_pdf: ", e)
         
     payment.status = "complete"
-    if owner.claimed_trial:
+    trial_active = False
+    if owner.claimed_trial and not owner.trial_used:
+        trial_active = True
         owner.trial_used = True
         
     period_end_seconds = lines_data.get("period").get("end")
@@ -1800,7 +1802,7 @@ async def _handle_invoice_created(db, data):
         
     if not owner.is_verified:
         # New subscription
-        owner.change_plan(payment.price_id)
+        owner.change_plan(payment.price_id, trial_active)
         owner.verify_owner(cancelled=False)
     else:
         # Recurring payment
@@ -1986,7 +1988,7 @@ async def create_payment_session(
                     }
                 ],
                 "subscription_data": {
-                    "trial_period_days": 1 if owner.claimed_trial and not owner.trial_used else None,
+                    "trial_period_days": TRIAL_LENGTH if owner.claimed_trial and not owner.trial_used else None,
                     "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id},
                 },
                 "saved_payment_method_options": {

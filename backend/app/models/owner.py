@@ -112,7 +112,7 @@ class Owner(Base):
     def __repr__(self):
         return f"<Owner(id={self.id}, email={self.email})>"
     
-    def change_plan(self, new_plan_id):
+    def change_plan(self, new_plan_id, trial_active):
         # Find the plan where the "id" matches new_plan_id
         matched_plan = None
         for plan_name, plan_info in plans_dict.items():
@@ -122,7 +122,9 @@ class Owner(Base):
 
         if matched_plan:
             # Only increase tokens if tokens are short
-            if self.current_tokens < plans_dict[matched_plan]["tokens"]:
+            if trial_active:
+                self.current_tokens = plans_dict[matched_plan]["tokens"] / 4
+            elif self.current_tokens < plans_dict[matched_plan]["tokens"]:
                 self.current_tokens = plans_dict[matched_plan]["tokens"]
                 
             self.plan = plans_dict[matched_plan]
