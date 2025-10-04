@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy import String, cast, Integer, or_
 import logging
 from datetime import datetime, timedelta, timezone
 import requests
@@ -1291,6 +1292,7 @@ async def create_submission(
 @app.post("/api/v1/submissions/upload-submission")
 async def upload_submission(
     submission_data: SubmissionManual,
+    background_tasks: BackgroundTasks,
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1312,6 +1314,8 @@ async def upload_submission(
     if owner.current_tokens <= 0:
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
+    hmdl_uuid = f"hmdl-wk-{uuid.uuid4()}"
+    
     # Create submission record
     submission = Submission(
         owner_id=owner.id,
@@ -1323,142 +1327,53 @@ async def upload_submission(
         meets_requirements=submission_data.meets_requirements,
         action_needed=submission_data.action_needed,
         function_pref=checked_pref,
-        work_id=f"hmdl-wk-{uuid.uuid4()}"
+        work_id=hmdl_uuid
     )
     
     db.add(submission)
     db.commit()
     db.refresh(submission)
     
-    try:
-        # Update status to processing
-        submission.update_status(ProcessingStatus.PROCESSING)
-        owner.texts_analysed = owner.texts_analysed + 1
-        db.commit()
-        
-        processing_result = await process_text(submission_data.orig_text, checked_pref)
-        
-        ai_res = processing_result["ai_result"]
-        plag_res = processing_result["plag_result"]
-        res_tokens = 0
-        
-        # Set tokens, scaled by markup factor
-        if "tokens" in ai_res.keys():
-            res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
-        if "tokens" in plag_res.keys():
-            res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
-            
-        # Delete if insufficient tokens
-        if res_tokens > owner.current_tokens:
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "Insufficient Tokens",
-                "html": render_no_tokens_email(bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
-            }
-            resend.Emails.send(email_params)
-            
-            owner.current_tokens = 0
-            
-            db.delete(submission)
-            db.commit()
-            return None
-        
-        # Start updating submission entry
-        submission.ai_result = ai_res
-        submission.plag_result = plag_res
-        submission.meets_requirements = ai_res["status"] == 200 or plag_res["status"] == 200
-        
-        submission.tokens_used = submission.tokens_used + res_tokens
-        owner.current_tokens = owner.current_tokens - res_tokens
-        owner.tokens_used = owner.tokens_used + res_tokens
-        
-        if submission.meets_requirements:
-            if "modif_text" in plag_res["result"].keys():
-                submission.temp_text = plag_res["result"]["modif_text"]
-                
-            submission.update_status(ProcessingStatus.SUCCESS)
-        else:
-            submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
-            
-        db.commit()
-        
-        # -- EMAIL - LOW TOKENS
-        if owner.low_tokens_option and owner.current_tokens <= owner.tokens_threshold:
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "Low Tokens",
-                "html": render_low_tokens_email(current=owner.current_tokens, bill_cycle=owner.verified_month_end, base_url=os.getenv("BASE_URL"))
-            }
-            
-            resend.Emails.send(email_params)
-            
-        # Plag score must meet criteria
-        if plag_res["score"] != "N/A" and plag_res["score"] >= 60:
-            
-            # -- PLAGIARISM DETECTED
-            
-            email_params: resend.Emails.sendParams = {
-                "from": "no-reply@heimdallqc.com",
-                "to": [owner.email],
-                "subject": "Plagiarism Detected - Action Needed",
-                "html": render_action_needed_email(base_url=os.getenv("BASE_URL"))
-            }
-            
-            resend.Emails.send(email_params)
-            
-            submission.update_action(True)
-            submission.meets_requirements = True
-            owner.plagiarisms_prevented = owner.plagiarisms_prevented + 1
-            
-            data = {
-                "owner_id": owner.id,
-                "submission_id": submission.id,
-                "ai_score": ai_res["score"],
-                "plag_score": plag_res["score"]
-            }
-            db.commit()
-        else:    
-            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
-                db.delete(submission)
-            else:
-                submission.meets_requirements = True
-        
-        db.commit()
-        db.refresh(submission)
-        
-    except Exception as e:
-        submission.update_status(ProcessingStatus.FAILED, f"Processing error: {str(e)}")
-        db.commit()
-        
-        return {
-            "status": "failed"
-        }
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid)
     
-    except Exception as e:
-        return {
-            "status": "completed"
-        }
+    return
 
 @app.get("/api/v1/submissions/self", response_model=List[SubmissionResponse])
 async def get_owner_submissions(
     page: int = Query(1, ge=1),
-    status: str = "success",
+    subs_filter: str = "",
+    subs_sort: str = "recent",
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
     
     # Build query
-    query = db.query(Submission).filter(Submission.owner_id == owner.id)
+    query = db.query(Submission).filter(
+        Submission.owner_id == owner.id,
+        Submission.status == "success"
+    )
+    filter_list = subs_filter.split(",") if subs_filter else []
+
+    if "ai" in filter_list:
+        query = query.filter(cast(cast(Submission.ai_result['score'], String), Integer) >= 60)
     
-    # Add status filter if provided
-    if status:
-        query = query.filter(Submission.status == status)
+    if not ("manual" in filter_list and "auto" in filter_list):
+        if "manual" in filter_list:
+            query = query.filter(Submission.manual_upload == True)
+        elif "auto" in filter_list:
+            query = query.filter(Submission.manual_upload == False)
     
-    # Get submissions with pagination
-    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
+    if subs_sort == "recent":
+        query = query.order_by(Submission.created_at.desc())
+    elif subs_sort == "oldest":
+        query = query.order_by(Submission.created_at.asc())
+    elif subs_sort == "ai-score":
+        query = query.order_by(cast(cast(Submission.ai_result['score'], String), Integer).desc())
+    elif subs_sort == "plag-score":
+        query = query.order_by(cast(cast(Submission.plag_result['score'], String), Integer).desc())
+
+    submissions = query.offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
 
     # Return list response
     return [
@@ -1565,25 +1480,17 @@ async def get_submission_by_workid(
    
 @app.get("/api/v1/submissions/self/action-needed", response_model=List[SubmissionResponse])
 async def get_submissions_action(
-    page: int = Query(1, ge=1),
-    status: str = "success",
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
     """List submissions for an owner (for admin/dashboard use)."""
 
     # Build query
-    query = db.query(Submission).filter(Submission.owner_id == owner.id)
-    
-    # Add status filter if provided
-    if status:
-        query = query.filter(
-            Submission.status == status,
-            Submission.action_needed == True
-        )
-    
-    # Get submissions with pagination
-    submissions = query.order_by(Submission.created_at.desc()).offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
+    submissions = db.query(Submission).filter(
+        Submission.owner_id == owner.id,
+        Submission.status == "success",
+        Submission.action_needed == True
+    ).all()
     
     # Return list response
     return [
@@ -1616,17 +1523,13 @@ async def get_submission_count(
     db: Session = Depends(get_db)
 ):
     """Get a count of all submissions, split into action-needed and not"""
-    
-    entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id).all())
-    action_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.action_needed == True).all())
-    success_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.status == "success").all())
-    success_action_entry_count = len(db.query(Submission).filter(Submission.owner_id == owner.id, Submission.action_needed == True, Submission.status == "success").all())
-    
+    query = db.query(Submission).filter(
+        Submission.owner_id == owner.id,
+        Submission.status == "success"
+    )
+
     return {
-        "ententry_countries": entry_count,
-        "action_entry_count": action_entry_count,
-        "success_entry_count": success_entry_count,
-        "success_action_entry_count": success_action_entry_count,
+        "entry_count": len(query.all()),
     }
     
 @app.delete("/api/v1/submissions/delete-submission")
@@ -1846,6 +1749,7 @@ async def _handle_invoice_created(db, data):
     
     # Fetch database entries
     try:
+        print(owner_unique_id)
         owner = await get_current_owner(db, owner_unique_id=owner_unique_id)
         payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id)
     except Exception as e:
