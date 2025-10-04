@@ -1751,12 +1751,10 @@ async def _handle_invoice_created(db, data):
     
     # Fetch database entries
     try:
-        print(owner_unique_id)
         owner = await get_current_owner(db, owner_unique_id=owner_unique_id, customer_id=customer_id)
         payment = await get_payment(db, owner_unique_id=owner.unique_id, unique_id=unique_id, subscription_id=owner.subscription_id)
     except Exception as e:
         print("Failed to fetch owner or payment: ", e)
-        
         
     # Save "invoice_id"
     try:
@@ -1988,7 +1986,7 @@ async def create_payment_session(
                     }
                 ],
                 "subscription_data": {
-                    "trial_period_days": 7 if owner.claimed_trial and not owner.trial_used else None,
+                    "trial_period_days": 1 if owner.claimed_trial and not owner.trial_used else None,
                     "metadata": {"owner_unique_id": str(owner.unique_id), "unique_id": unique_id},
                 },
                 "saved_payment_method_options": {
