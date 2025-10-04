@@ -281,8 +281,8 @@ def render_action_needed_email(base_url: str, work_id: str):
     html_template = """
     <html>
       <body>
-        <div style="width: 100%; background-color: #111; height: 120px; display: flex; justify-content: center; align-items: center;">
-            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 80px;" />
+        <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
+            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
         <div style="padding: 20px; background-color: #222; font-family: Arial;">
           <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Action needed</h1>
@@ -304,8 +304,8 @@ def render_payment_conf_email(invoice_pdf: str, base_url: str):
     html_template = """
     <html>
       <body>
-        <div style="width: 100%; background-color: #111; height: 120px; display: flex; justify-content: center; align-items: center;">
-            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 80px;" />
+        <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
+            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
         <div style="padding: 20px; background-color: #222; font-family: Arial;">
           <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Thank you for your payment!</h1>
@@ -330,8 +330,8 @@ def render_low_tokens_email(current: int, bill_cycle: str, base_url: str):
     html_template = """
     <html>
       <body>
-        <div style="width: 100%; background-color: #111; height: 120px; display: flex; justify-content: center; align-items: center;">
-            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 80px;" />
+        <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
+            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
         <div style="padding: 20px; background-color: #222; font-family: Arial;">
           <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">Low Tokens: {{ current }}</h1>
@@ -353,8 +353,8 @@ def render_no_tokens_email(bill_cycle: str, base_url: str):
     html_template = """
     <html>
       <body>
-        <div style="width: 100%; background-color: #111; height: 120px; display: flex; justify-content: center; align-items: center;">
-            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 80px;" />
+        <div style="width: 100%; height: 120px; display: flex; justify-content: center; align-items: center;">
+            <img src="https://heimdallqc.com/images/SVG/logo-main.png" alt="Heimdall QC Logo" style="height: 75px;" />
         </div>
         <div style="padding: 20px; background-color: #222; font-family: Arial;">
           <h1 style="color: #fff; font-size: 28px; margin-bottom: 16px;">No Tokens Remaining</h1>
