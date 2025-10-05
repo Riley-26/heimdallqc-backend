@@ -1339,6 +1339,9 @@ async def upload_submission(
     """
     Create a new submission and process it.
     """
+    if owner.plan["name"] == "extrinsic":
+        raise HTTPException(status_code=401, detail="Unauthorised to use this function")
+    
     key = db.query(ApiKey).filter(
         ApiKey.owner_id == owner.id,
         ApiKey.id == submission_data.api_key_id,
