@@ -1231,6 +1231,32 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             "status": 500
         }
 
+def build_query(owner_id, query, sort, filters):
+    """Build the query using params"""
+    
+    # Apply filters using OR logic
+    if filters:
+        filter_conditions = []
+        if "ai" in filters:
+            filter_conditions.append(cast(cast(Submission.ai_result['score'], String), Integer) >= 60)
+        if "manual" in filters:
+            filter_conditions.append(Submission.manual_upload == True)
+        if "auto" in filters:
+            filter_conditions.append(Submission.manual_upload == False)
+        if filter_conditions:
+            query = query.filter(or_(*filter_conditions))
+            
+    if sort == "recent":
+        query = query.order_by(Submission.created_at.desc())
+    elif sort == "oldest":
+        query = query.order_by(Submission.created_at.asc())
+    elif sort == "ai-score":
+        query = query.order_by(cast(cast(Submission.ai_result['score'], String), Integer).desc())
+    elif sort == "plag-score":
+        query = query.order_by(cast(cast(Submission.plag_result['score'], String), Integer).desc())    
+        
+    return query
+
 @app.post("/api/v1/submissions/create-submission")
 async def create_submission(
     submission_data: SubmissionAuto,
@@ -1262,6 +1288,9 @@ async def create_submission(
         if owner.function_pref[i] == True:
             checked_pref = i
             break
+        
+    if owner.plan["name"] == "intrinsic":
+        raise HTTPException(status_code=401, detail="Unauthorised to use this function")
         
     # Cannot process if no tokens
     if owner.current_tokens <= 0:
@@ -1353,7 +1382,7 @@ async def upload_submission(
 async def get_owner_submissions(
     page: int = Query(1, ge=1),
     subs_filter: str = "",
-    subs_sort: str = "recent",
+    subs_sort: str = "",
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1366,23 +1395,7 @@ async def get_owner_submissions(
     )
     filter_list = subs_filter.split(",") if subs_filter else []
 
-    if "ai" in filter_list:
-        query = query.filter(cast(cast(Submission.ai_result['score'], String), Integer) >= 60)
-    
-    if not ("manual" in filter_list and "auto" in filter_list):
-        if "manual" in filter_list:
-            query = query.filter(Submission.manual_upload == True)
-        elif "auto" in filter_list:
-            query = query.filter(Submission.manual_upload == False)
-    
-    if subs_sort == "recent":
-        query = query.order_by(Submission.created_at.desc())
-    elif subs_sort == "oldest":
-        query = query.order_by(Submission.created_at.asc())
-    elif subs_sort == "ai-score":
-        query = query.order_by(cast(cast(Submission.ai_result['score'], String), Integer).desc())
-    elif subs_sort == "plag-score":
-        query = query.order_by(cast(cast(Submission.plag_result['score'], String), Integer).desc())
+    query = build_query(owner_id=owner.id, query=query, sort=subs_sort, filters=filter_list)
 
     submissions = query.offset((page-1)*PAGE_LIMIT).limit(PAGE_LIMIT).all()
 
@@ -1501,7 +1514,7 @@ async def get_submissions_action(
         Submission.owner_id == owner.id,
         Submission.status == "success",
         Submission.action_needed == True
-    ).all()
+    ).order_by(Submission.created_at.desc()).all()
     
     # Return list response
     return [
@@ -1530,6 +1543,8 @@ async def get_submissions_action(
     
 @app.get("/api/v1/submissions/self/entry-count")
 async def get_submission_count(
+    subs_filter: str = "",
+    subs_sort: str = "",
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1538,6 +1553,9 @@ async def get_submission_count(
         Submission.owner_id == owner.id,
         Submission.status == "success"
     )
+    filter_list = subs_filter.split(",") if subs_filter else []
+    
+    query = build_query(owner_id=owner.id, query=query, sort=subs_sort, filters=filter_list)
 
     return {
         "entry_count": len(query.all()),
