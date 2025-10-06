@@ -797,7 +797,7 @@ async def change_plan(
         )
     else:
         # Then update in database if no errors
-        owner.change_plan(request.new_plan_id)
+        owner.change_plan(request.new_plan_id, False)
         owner.verify_owner(cancelled=False)
         db.commit()
         return
