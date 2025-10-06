@@ -317,7 +317,7 @@ def render_payment_conf_email(invoice_pdf: str, paid: str, name: str, base_url: 
             <div style="padding: 20px; display: flex; justify-content: space-between;">
               <p style="color: #333; font-size: 16px;">{{ name }}</p>
             </div>
-            <div style="padding: 20px; display: flex; justify-content: space-between;">
+            <div style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
               <p style="color: #333; font-size: 16px;">Total paid:</p>
               <p style="color: #333; font-size: 16px;">{{ paid }}</p>
             </div>
@@ -1811,7 +1811,7 @@ async def _handle_invoice_created(db, data):
                 "from": "no-reply@heimdallqc.com",
                 "to": [owner.email],
                 "subject": "Payment Confirmation",
-                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, paid=data_obj.get("amount_due"), name=lines_data.get("description"), base_url=os.getenv("BASE_URL"))
+                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, paid=f"£{data_obj.get("amount_due") / 100}", name=lines_data.get("description"), base_url=os.getenv("BASE_URL"))
             }
             
             resend.Emails.send(email_params)
