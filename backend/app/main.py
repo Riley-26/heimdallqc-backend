@@ -443,7 +443,7 @@ def plag_analysis(text: str, owner_pref: str):
             "tokens": 0
         }
 
-    if response["status"] == 200 and response["result"]["score"] >= 80:
+    if response["status"] == 200 and response["result"]["score"] > 0:
         if response["result"]["sourceCounts"] > 0:
             if owner_pref == "ai_rewrite":
                 result = ai_rewrite(text)
@@ -531,7 +531,7 @@ def ai_rewrite(text: str):
 
     return { 
         "modif_text": response.output_text,
-        "tokens": 0
+        "tokens": response.usage.output_tokens
     }
 
 # -- REDACTED
@@ -576,7 +576,10 @@ def redact_text(text: str, sources: list):
         last_idx = r["end"]
     redacted_text += text[last_idx:]
 
-    return { "modif_text": redacted_text }
+    return { 
+        "modif_text": redacted_text,
+        "tokens": 0
+    }
     
 # -- ANALYTICS
 
@@ -1100,6 +1103,8 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             res_tokens += math.ceil(ai_res["tokens"] / MARKUP_FACTOR)
         if "tokens" in plag_res.keys():
             res_tokens += math.ceil(plag_res["tokens"] / MARKUP_FACTOR)
+            if "tokens" in plag_res["result"].keys():
+                res_tokens += math.ceil(plag_res["result"]["tokens"] / MARKUP_FACTOR)
             
         # Delete if insufficient tokens, send email
         if res_tokens > owner.current_tokens:
@@ -1146,7 +1151,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             
         db.commit()
-            
+        print(plag_res)
         # Plagiarism detected, send email
         if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
             email_params: resend.Emails.sendParams = {
@@ -1365,10 +1370,10 @@ async def upload_submission(
         api_key_id=submission_data.api_key_id,
         orig_text=submission_data.orig_text,
         orig_text_length=len(submission_data.orig_text),
-        manual_upload=submission_data.manual_upload,
-        status=ProcessingStatus.PENDING,
-        meets_requirements=submission_data.meets_requirements,
-        action_needed=submission_data.action_needed,
+        manual_upload=True,
+        status=ProcessingStatus.PROCESSING,
+        meets_requirements=False,
+        action_needed=False,
         function_pref=checked_pref,
         work_id=hmdl_uuid
     )
@@ -1377,7 +1382,7 @@ async def upload_submission(
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid)
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid, "", checked_pref)
     
     return
 
