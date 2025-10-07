@@ -195,6 +195,17 @@ def process_text(text: str, owner_pref: str = "", checked_state: bool = False):
         "text": text
     }
 
+def calc_plag_score(plag_word_count: int):
+    """Calculate normalised plagiarism score, based on plag word count"""
+    min_threshold = 30
+    midpoint = 150
+    steepness = 0.05
+    
+    score = 100 / (1 + math.exp(-steepness * (plag_word_count - midpoint)))
+    
+    
+    return min(score, 100)
+
 async def get_current_owner(
     db: Session,
     owner_unique_id: str = None,
@@ -443,7 +454,7 @@ def plag_analysis(text: str, owner_pref: str):
             "tokens": 0
         }
 
-    if response["status"] == 200 and response["result"]["score"] > 0:
+    if response["status"] == 200 and response["result"]["score"] >= calc_plag_score(response["result"]["totalPlagiarismWords"]):
         if response["result"]["sourceCounts"] > 0:
             if owner_pref == "ai_rewrite":
                 result = ai_rewrite(text)
@@ -453,7 +464,7 @@ def plag_analysis(text: str, owner_pref: str):
             if "sources" in response.keys() and len(response["sources"]) > 0:
                 saved_sources = []
                 for i in response["sources"]:
-                    if i["score"] >= PLAG_THRESHOLD and i["canAccess"]:
+                    if i["score"] >= calc_plag_score(i["plagiarismWords"]) and i["canAccess"]:
                         saved_sources.append({
                             "score": i["score"],
                             "total_words": i["totalNumberOfWords"],
@@ -1164,7 +1175,9 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
         db.commit()
         print(plag_res)
         # Plagiarism detected, send email
-        if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
+        if plag_res["score"] != "N/A" and plag_res["score"] >= calc_plag_score(plag_res["score"]):
+            """
+            
             email_params: resend.Emails.sendParams = {
                 "from": "no-reply@heimdallqc.com",
                 "to": [owner.email],
@@ -1172,6 +1185,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
                 "html": render_action_needed_email(base_url=os.getenv("BASE_URL"),work_id=work_id)
             }
             resend.Emails.send(email_params)
+            """
             
             submission.update_action(True)
             submission.meets_requirements = True
