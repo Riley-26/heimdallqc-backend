@@ -450,8 +450,19 @@ def plag_analysis(text: str, owner_pref: str):
             elif owner_pref == "redact":
                 result = redact_text(text, response["sources"])
                 
-            if "sources" in response.keys():
-                result["sources"] = response["sources"]
+            if "sources" in response.keys() and len(response["sources"]) > 0:
+                saved_sources = []
+                for i in response["sources"]:
+                    if i["score"] >= PLAG_THRESHOLD and i["canAccess"]:
+                        saved_sources.append({
+                            "score": i["score"],
+                            "total_words": i["totalNumberOfWords"],
+                            "plag_words": i["plagiarismWords"],
+                            "url": i["url"],
+                            "plag_found_start": i["plagiarismFound"][0]["startIndex"],
+                            "plag_found_end": i["plagiarismFound"][0]["endIndex"]
+                        })
+                result["sources"] = saved_sources
     
     return {
         "status": response["status"],
@@ -1816,7 +1827,7 @@ async def _handle_invoice_created(db, data):
                 "from": "no-reply@heimdallqc.com",
                 "to": [owner.email],
                 "subject": "Payment Confirmation",
-                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, paid=f"£{data_obj.get("amount_due") / 100}", name=lines_data.get("description"), base_url=os.getenv("BASE_URL"))
+                "html": render_payment_conf_email(invoice_pdf=invoice_pdf, paid=f"£{data_obj.get('amount_due') / 100}", name=lines_data.get("description"), base_url=os.getenv("BASE_URL"))
             }
             
             resend.Emails.send(email_params)
