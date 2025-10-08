@@ -8,7 +8,6 @@ from enum import Enum
 class ApiKeyBase(BaseModel):
     name: str
 
-
 # -- INPUT MODELS
 
 class ApiKeyCreate(ApiKeyBase):

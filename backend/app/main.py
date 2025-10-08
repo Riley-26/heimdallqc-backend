@@ -24,17 +24,19 @@ from .models.owner import Owner
 from .models.api_key import ApiKey
 from .models.submission import Submission, ProcessingStatus
 from .models.payment import Payment
+from .models.webhook import Webhook
 from .models.event import Event
 from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
+from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
 PAGE_LIMIT = 10
 TRIAL_LENGTH = 7
-PLAG_THRESHOLD = 60
+PLAG_THRESHOLD = 40
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
@@ -169,7 +171,7 @@ async def authenticate_api_key(api_key: str) -> ApiKey:
         db.close()
 
 # Text processing function
-def process_text(text: str, owner_pref: str = "", checked_state: bool = False):
+def process_text(text: str, placeholder: str, checked_state: bool = False):
     """
     Process the submitted text and determine if it meets requirements.
     
@@ -180,7 +182,7 @@ def process_text(text: str, owner_pref: str = "", checked_state: bool = False):
         Dict with processed results and validation status
     """
     # ANALYSIS
-    plag_result = plag_analysis(text, owner_pref)
+    plag_result = plag_analysis(text, placeholder)
     ai_result = {
         "status": 200,
         "score": 100,
@@ -197,14 +199,17 @@ def process_text(text: str, owner_pref: str = "", checked_state: bool = False):
 
 def calc_plag_score(plag_word_count: int):
     """Calculate normalised plagiarism score, based on plag word count"""
-    min_threshold = 30
-    midpoint = 150
-    steepness = 0.05
+    min_threshold = 20
+    midpoint = 80
+    steepness = 0.04
     
     score = 100 / (1 + math.exp(-steepness * (plag_word_count - midpoint)))
     
+    if plag_word_count < min_threshold:
+        dampening = plag_word_count / min_threshold ** 0.5
+        score = score * dampening
     
-    return min(score, 100)
+    return min(score//1, 100)
 
 async def get_current_owner(
     db: Session,
@@ -430,7 +435,7 @@ def ai_analysis(text: str):
     }
 
 # -- PLAGIARISM ANALYSIS
-def plag_analysis(text: str, owner_pref: str):
+def plag_analysis(text: str, placeholder: str):
     winston_url = "https://api.gowinston.ai/v2/plagiarism"
     key = os.getenv("WINST_KEY")
     
@@ -450,158 +455,80 @@ def plag_analysis(text: str, owner_pref: str):
         return {
             "status": 400,
             "score": "N/A",
-            "result": {},
+            "result": result,
             "tokens": 0
         }
 
-    if response["status"] == 200 and response["result"]["score"] >= calc_plag_score(response["result"]["totalPlagiarismWords"]):
-        if response["result"]["sourceCounts"] > 0:
-            if owner_pref == "ai_rewrite":
-                result = ai_rewrite(text)
-            elif owner_pref == "redact":
-                result = redact_text(text, response["sources"])
-                
-            if "sources" in response.keys() and len(response["sources"]) > 0:
-                saved_sources = []
-                for i in response["sources"]:
-                    if i["score"] >= calc_plag_score(i["plagiarismWords"]) and i["canAccess"]:
-                        saved_sources.append({
-                            "score": i["score"],
-                            "total_words": i["totalNumberOfWords"],
-                            "plag_words": i["plagiarismWords"],
-                            "url": i["url"],
-                            "plag_found_start": i["plagiarismFound"][0]["startIndex"],
-                            "plag_found_end": i["plagiarismFound"][0]["endIndex"]
-                        })
-                result["sources"] = saved_sources
+    if response["status"] == 200:
+        score = calc_plag_score(response["result"]["totalPlagiarismWords"])
+        print(response)
+        print(score)
+        if score >= PLAG_THRESHOLD:
+            if response["result"]["sourceCounts"] > 0:
+                snippets = []
+                if "sources" in response.keys() and len(response["sources"]) > 0:
+                    saved_sources = []
+                    for i in response["sources"]:
+                        if len(i["plagiarismFound"]) > 0:
+                            snippets.append([i["plagiarismFound"][0]["startIndex"], i["plagiarismFound"][0]["endIndex"]])
+                            print(snippets)
+                            if calc_plag_score(i["plagiarismWords"]) >= PLAG_THRESHOLD and i["canAccess"]:
+                                print(i["score"])
+                                saved_sources.append({
+                                    "score": i["score"],
+                                    "total_words": i["totalNumberOfWords"],
+                                    "plag_words": i["plagiarismWords"],
+                                    "url": i["url"],
+                                    "plag_found_start": i["plagiarismFound"][0]["startIndex"],
+                                    "plag_found_end": i["plagiarismFound"][0]["endIndex"]
+                                })
+                        result["sources"] = saved_sources
+                    
+                result["modified_text"] = remove_text(text, snippets, placeholder)
     
     return {
         "status": response["status"],
-        "score": response["result"]["score"],
+        "score": score if score else 0,
+        "dist": response["result"]["score"],
         "result": result if result else {},
         "tokens": response["credits_used"]
     }
 
-# -- AUTO-CITATION -- FOR FUTURE
-'''
-def auto_cite(text: str, sources: list):
-    """
-    Auto-cite multiple sources in the text, avoiding overlapping citations.
-    Args:
-        text: The original text.
-        sources: List of source dicts, each with 'plagiarismFound', 'url', 'title'.
-    Returns:
-        Dict with 'cited_text' and a list of 'citations' used.
-    """
-    # Collect all citation ranges with source info
-    ranges = []
-    for source in sources:
-        for found in source.get("plagiarismFound", []):
-            ranges.append({
-                "start": found["startIndex"],
-                "end": found["endIndex"],
-                "source": {"url": source["url"], "title": source["title"]}
-            })
+# -- REMOVAL
+def remove_text(text: str, snippets: list, placeholder: str):
+    """Remove multiple snippets in the text, avoiding overlapping sections."""
 
-    # Sort by start index, then by longest match first
-    ranges.sort(key=lambda x: (x["start"], -(x["end"] - x["start"])))
-
-    # Merge overlapping/duplicate ranges, keeping the first source for each range
+    if not snippets:
+        return text
+    
+    # Remove duplicates and sort by start index
+    snippets = sorted(set(tuple(s) for s in snippets), key=lambda x: x[0])
+    
+    # Merge overlapping snippets
     merged = []
-    last_end = -1
-    for r in ranges:
-        if r["start"] >= last_end:
-            merged.append(r)
-            last_end = r["end"]
+    current_start, current_end = snippets[0]
+    
+    for start, end in snippets[1:]:
+        # Check if current snippet overlaps with the next one
+        if start <= current_end:
+            # Overlapping - extend current snippet to cover both
+            current_end = max(current_end, end)
         else:
-            # Overlap: skip or adjust as needed (here, we skip)
-            continue
-
-    # Build the new text with citations
-    cited_text = ""
-    last_idx = 0
-    citations = []
-    for r in merged:
-        cited_text += text[last_idx:r["start"]]
-        cited_text += f'"{text[r["start"]:r["end"]]}"'
-        citations.append(r["source"])
-        last_idx = r["end"]
-    cited_text += text[last_idx:]
-
-    return {
-        "modif_text": cited_text,
-        "citations": citations
-    }
-'''
-
-# -- AI REWRITE
-def ai_rewrite(text: str):
-    from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("GPT_KEY"))
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        instructions="",
-        input=f"""
-            Rewrite my original text:
-            
-            "{text}"
-            
-            Output only the text.
-        """
-    )
-
-    return { 
-        "modif_text": response.output_text,
-        "tokens": response.usage.output_tokens
-    }
-
-# -- REDACTED
-def redact_text(text: str, sources: list):
-    """
-    Redact multiple sources in the text, avoiding overlapping redactions.
-    Args:
-        text: The original text.
-        sources: List of source dicts, each with 'plagiarismFound'.
-    Returns:
-        The redacted text.
-    """
-    # Collect all ranges to redact
-    ranges = []
-    for source in sources:
-        for found in source.get("plagiarismFound", []):
-            ranges.append({
-                "start": found["startIndex"],
-                "end": found["endIndex"]
-            })
-
-    # Sort by start index, then by longest match first
-    ranges.sort(key=lambda x: (x["start"], -(x["end"] - x["start"])))
-
-    # Merge overlapping/duplicate ranges
-    merged = []
-    last_end = -1
-    for r in ranges:
-        if r["start"] >= last_end:
-            merged.append(r)
-            last_end = r["end"]
-        else:
-            # Overlap: skip or adjust as needed (here, we skip)
-            continue
-
-    # Build the new text with redactions
-    redacted_text = ""
-    last_idx = 0
-    for r in merged:
-        redacted_text += text[last_idx:r["start"]]
-        redacted_text += " [REDACTED] "
-        last_idx = r["end"]
-    redacted_text += text[last_idx:]
-
-    return { 
-        "modif_text": redacted_text,
-        "tokens": 0
-    }
+            # No overlap - save current and start new one
+            merged.append([current_start, current_end])
+            current_start, current_end = start, end
+    
+    # Don't forget the last snippet
+    merged.append([current_start, current_end])
+    
+    # Now replace in reverse order
+    merged.reverse()
+    text_list = list(text)
+    
+    for start, end in merged:
+        text_list[start:end] = list(placeholder)
+    
+    return ''.join(text_list)
     
 # -- ANALYTICS
 
@@ -694,7 +621,7 @@ async def get_owner_details(
         texts_analysed=owner.texts_analysed,
         verified_month_end=owner.verified_month_end,
         plan=owner.plan,
-        function_pref=owner.function_pref,
+        placeholder=owner.placeholder,
         ai_threshold_option=owner.ai_threshold_option,
         tokens_threshold=owner.tokens_threshold,
         low_tokens_option=owner.low_tokens_option,
@@ -869,7 +796,7 @@ async def update_settings(
     db: Session = Depends(get_db)
 ):
     """Updates all of the owner's settings"""
-    owner.function_pref = request.function_pref
+    owner.placeholder = request.placeholder
     owner.ai_threshold_option = request.ai_threshold_option
     
     db.commit()
@@ -1093,12 +1020,78 @@ async def deactivate_api_key(
     
     return
 
+# ----------  WEBHOOK ENDPOINTS ----------
+
+@app.post("/api/v1/webhooks/create-webhook")
+async def create_webhook(
+    webhook_data: WebhookCreate,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Create webhook for an owner.
+    """
+    # Generate new API key
+    webhook = Webhook(
+        owner_id=owner.id,
+        name=webhook_data.name,
+        endpoint=webhook_data.endpoint
+    )
+    
+    db.add(webhook)
+    db.commit()
+    db.refresh(webhook)
+    
+    return
+
+@app.get("/api/v1/webhooks/self", response_model=List[WebhookListResponse])
+async def get_webhooks(
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    List all webhooks for an owner.
+    """
+    
+    webhooks = db.query(Webhook).filter(
+        Webhook.owner_id == owner.id
+    ).all()
+    
+    return [
+        WebhookListResponse(
+            id=webhook.id,
+            name=webhook.name,
+            endpoint=webhook.endpoint
+        )
+        for webhook in webhooks if webhooks
+    ]
+
+@app.delete("/api/v1/webhooks/delete-webhook")
+async def delete_webhook(
+    webhook_data: WebhookDelete,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a webhook.
+    """
+    webhook = db.query(Webhook).filter(
+        Webhook.id == webhook_data.webhook_id,
+        Webhook.owner_id == owner.id
+    ).first()
+    if not webhook:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    
+    db.delete(webhook)
+    db.commit()
+    
+    return
 
 # ---------- SUBMISSION ENDPOINTS ----------
 
 from fastapi import BackgroundTasks
 
-def process_submission(owner_id, submission_id, text, work_id, webhook_url="", function_pref="", question_result=False):
+def process_submission(owner_id, submission_id, text, work_id, webhook_url="", question_result=False):
     """Background function for processing submission"""
     db = SessionLocal()
     try:
@@ -1109,7 +1102,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             print("Owner or submission not found")
             return
         
-        processing_result = process_text(text, function_pref, question_result)
+        processing_result = process_text(text, owner.placeholder, question_result)
         
         # Update owner stats
         owner.texts_analysed = owner.texts_analysed + 1
@@ -1164,8 +1157,8 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
         if submission.meets_requirements:
             # Save modified text, plag score is high
             if "result" in plag_res.keys():
-                if "modif_text" in plag_res["result"].keys():
-                    modified_text = plag_res["result"]["modif_text"]
+                if "modified_text" in plag_res["result"].keys():
+                    modified_text = plag_res["result"]["modified_text"]
                     submission.temp_text = modified_text
                 
             submission.update_status(ProcessingStatus.SUCCESS)
@@ -1173,9 +1166,8 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", f
             submission.update_status(ProcessingStatus.FAILED, "Text failed to process")
             
         db.commit()
-        print(plag_res)
         # Plagiarism detected, send email
-        if plag_res["score"] != "N/A" and plag_res["score"] >= calc_plag_score(plag_res["score"]):
+        if plag_res["score"] != "N/A" and calc_plag_score(plag_res["score"]) >= PLAG_THRESHOLD:
             """
             
             email_params: resend.Emails.sendParams = {
@@ -1314,10 +1306,6 @@ async def create_submission(
     owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
-    for i in owner.function_pref.keys():
-        if owner.function_pref[i] == True:
-            checked_pref = i
-            break
         
     if owner.plan["name"] == "intrinsic":
         raise HTTPException(status_code=401, detail="Unauthorised to use this function")
@@ -1345,7 +1333,6 @@ async def create_submission(
         status=ProcessingStatus.PROCESSING,
         meets_requirements=False,
         action_needed=False,
-        function_pref=checked_pref,
         work_id=submission_data.work_id,
         domain=submission_data.domain,
         page_link=submission_data.page_link
@@ -1355,7 +1342,7 @@ async def create_submission(
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, submission_data.work_id, submission_data.webhook_url, checked_pref, submission_data.question_result)
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, submission_data.work_id, submission_data.webhook_url, submission_data.question_result)
     
     return
 
@@ -1380,10 +1367,6 @@ async def upload_submission(
     if not key:
         raise HTTPException(status_code=404, detail="No key available")
     
-    for i in owner.function_pref.keys():
-        if owner.function_pref[i] == True:
-            checked_pref = i
-            break
     if owner.current_tokens <= 0:
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
@@ -1399,7 +1382,6 @@ async def upload_submission(
         status=ProcessingStatus.PROCESSING,
         meets_requirements=False,
         action_needed=False,
-        function_pref=checked_pref,
         work_id=hmdl_uuid
     )
     
@@ -1407,7 +1389,7 @@ async def upload_submission(
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid, "", checked_pref)
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid, "")
     
     return
 
@@ -1451,8 +1433,7 @@ async def get_owner_submissions(
             plag_result=sub.plag_result,
             edited=sub.edited,
             page_link=sub.page_link,
-            domain=sub.domain,
-            function_pref=sub.function_pref,
+            domain=sub.domain
         )
         for sub in submissions if submissions
     ]
@@ -1490,7 +1471,6 @@ async def get_submission_detailed(
         edited=submission.edited,
         page_link=submission.page_link,
         domain=submission.domain,
-        function_pref=submission.function_pref,
         api_key_id=submission.api_key_id,
         owner_id=submission.owner_id,
         failure_reason=submission.failure_reason,
@@ -1498,7 +1478,7 @@ async def get_submission_detailed(
         edited_at=submission.edited_at
     )
    
-@app.get("/api/v1/submissions/work_id/{work_id}")
+@app.get("/api/v1/submissions/work_id/{work_id}", response_model=SubmissionDetailResponse)
 async def get_submission_by_workid(
     work_id: str,
     db: Session = Depends(get_db)
@@ -1511,29 +1491,30 @@ async def get_submission_by_workid(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
-    return {
-        "id": submission.id,
-        "owner_id": submission.owner_id,
-        "status": submission.status,
-        "action_needed": submission.action_needed,
-        "manual_upload": submission.manual_upload,
-        "tokens_used": submission.tokens_used,
-        "created_at": submission.created_at,
-        "work_id": submission.work_id,
-        "meets_requirements": submission.meets_requirements,
-        "orig_text": submission.orig_text,
-        "edit_text": submission.edit_text,
-        "temp_text": submission.temp_text,
-        "ai_result": submission.ai_result,
-        "plag_result": submission.plag_result,
-        "edited": submission.edited,
-        "page_link": submission.page_link,
-        "domain": submission.domain,
-        "function_pref": submission.function_pref,
-        "failure_reason": submission.failure_reason,
-        "completed_processing_at": submission.completed_processing_at,
-        "edited_at": submission.edited_at
-    }
+    return SubmissionDetailResponse(
+        id=submission.id,
+        status=submission.status,
+        action_needed=submission.action_needed,
+        manual_upload=submission.manual_upload,
+        tokens_used=submission.tokens_used,
+        created_at=submission.created_at,
+        unique_id=submission.unique_id,
+        work_id=submission.work_id,
+        meets_requirements=submission.meets_requirements,
+        orig_text=submission.orig_text,
+        edit_text=submission.edit_text,
+        temp_text=submission.temp_text,
+        ai_result=submission.ai_result,
+        plag_result=submission.plag_result,
+        edited=submission.edited,
+        page_link=submission.page_link,
+        domain=submission.domain,
+        api_key_id=submission.api_key_id,
+        owner_id=submission.owner_id,
+        failure_reason=submission.failure_reason,
+        completed_processing_at=submission.completed_processing_at,
+        edited_at=submission.edited_at
+    )
    
 @app.get("/api/v1/submissions/self/action-needed", response_model=List[SubmissionResponse])
 async def get_submissions_action(
@@ -1568,8 +1549,7 @@ async def get_submissions_action(
             plag_result=sub.plag_result,
             edited=sub.edited,
             page_link=sub.page_link,
-            domain=sub.domain,
-            function_pref=sub.function_pref,
+            domain=sub.domain
         )
         for sub in submissions if submissions
     ]

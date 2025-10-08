@@ -53,7 +53,7 @@ class OwnerDelete(BaseModel):
 
 class SettingsUpdate(BaseModel):
     """Update owner settings"""
-    function_pref: Dict[str, bool]
+    placeholder: str
     ai_threshold_option: int = Field(ge=40, le=99)
     
 class EmailPrefsUpdate(BaseModel):
@@ -117,7 +117,7 @@ class OwnerDetailResponse(OwnerResponse):
     claimed_trial: bool
     trial_used: bool
     verified_month_end: Optional[datetime] = None
-    function_pref: dict
+    placeholder: str
     ai_threshold_option: int
     tokens_threshold: int
     low_tokens_option: bool

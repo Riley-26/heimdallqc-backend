@@ -71,7 +71,6 @@ class SubmissionResponse(SubmissionResponseBase):
     edited: bool
     page_link: Optional[str] = None
     domain: Optional[str] = None
-    function_pref: str
     
 class SubmissionDetailResponse(SubmissionResponse):
     """Detailed response for admin/owner views"""

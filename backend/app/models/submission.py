@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Enum, Floa
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
-from datetime import datetime
+from datetime import datetime, timezone
 import enum
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -26,6 +26,7 @@ class Submission(Base):
     # Foreign keys
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
     api_key_id = Column(Integer, ForeignKey("api_keys.id"), nullable=False, index=True)
+    webhook_id = Column(Integer, ForeignKey("webhooks.id"), nullable=True, index=True)
     
     # Content
     orig_text = Column(Text, nullable=False)
@@ -42,7 +43,6 @@ class Submission(Base):
     failure_reason = Column(String(500), nullable=True)
     action_needed = Column(Boolean, nullable=False)
     edited = Column(Boolean, nullable=False, default=False)
-    function_pref = Column(String(20), default="Auto-cite", nullable=False)
     tokens_used = Column(Integer, nullable=False, default=0)
     ai_result = Column(JSON, nullable=True)
     plag_result = Column(JSON, nullable=True)
@@ -59,6 +59,7 @@ class Submission(Base):
     
     # Relationships
     owner = relationship("Owner", back_populates="submissions")
+    webhook_obj = relationship("Webhook", back_populates="submissions")
     api_key_obj = relationship("ApiKey", back_populates="submissions")
 
     def __repr__(self):
@@ -79,7 +80,7 @@ class Submission(Base):
         self.status = new_status
         
         if self.is_completed:
-            self.completed_processing_at = datetime.now()
+            self.completed_processing_at = datetime.now(timezone.utc)
         
         if reason:
             self.failure_reason = reason

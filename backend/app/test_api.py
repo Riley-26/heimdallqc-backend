@@ -1,9 +1,8 @@
 import requests
 import json
-from app.main import ai_analysis, plag_analysis, redact_text, ai_rewrite, auto_cite
 
 # Base URL for your API
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://127.0.0.1:8000"
 
 # ---------- OWNER TESTING ----------
 
@@ -112,6 +111,21 @@ def test_get_submissions(owner_id, submission_id = None):
         print(f"Error: {response.text}")
         return None
     
+def create_webhook():
+    url = f"{BASE_URL}/api/v1/webhooks/create-webhook"
+    data = {
+        "name": "hello",
+        "endpoint": "http://127.0.0.1:8000"
+    }
+    
+    response = requests.post(url, json=data)
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error: {response.text}")
+        return None
+    
 
 # ---------- VERIFIED SITES TEST ----------
 
@@ -144,7 +158,7 @@ if __name__ == "__main__":
     
     #test_get_verif_sites("localhost")
     
-    text = "In making a trench, soil from the excavation is used to create raised parapets running both in front of and behind the trench. Within the trench are firing positions along a raised forward step called a fire step, and duckboards are placed on the often muddy bottom of the trench to provide secure footing."
+    text = "When constructing a trench, the excavated soil is piled up to form raised parapets on both the front and rear sides of the trench. Inside the trench, firing positions are established along a raised forward ledge known as a fire step, while duckboards are laid on the frequently muddy floor to ensure firm footing. As early as the 19th century, criminal profiling began to emerge, with the Jack the Ripper case being the first instance of criminal profiling, by forensic doctor and surgeon Thomas Bond. In the first decade of the 20th century, Hugo Münsterberg, the first director of Harvard's psychological laboratory and a student of Wilhelm Wundt, one of the first experimental psychologists, authored On the Witness Stand. In the publication, Münsterberg attempted to demonstrate how psychological research could be applied in legal proceedings. Sigmund Freud also discussed how psychopathological processes play a role in criminal behavior. Other significant early figures in forensic psychology include Lightner Witmer, and William Healy.In 1917, the lie detector was invented by the psychologist William Marston. Six years after its invention, Marston brought his lie detector to court in the case of Frye v. United States at the request of James A. Frye's attorneys, who hoped Marston's device would prove their client's innocence."
     
     reworded = """
         When constructing a trench, the excavated soil is piled up to form raised parapets on both the front and rear sides of the trench. Inside the trench, firing positions are established along a raised forward ledge known as a fire step, while duckboards are laid on the frequently muddy floor to ensure firm footing.
@@ -387,6 +401,7 @@ if __name__ == "__main__":
     
     #print(ai_analysis(reworded))
     #print(plag_analysis(text))
-    print(redact_text(text, sources))
-    #print(ai_rewrite(text))
+    #print(redact_text(text, sources))
+    #print(ai_rewrite(text, [[313,1337]]))
     #print(auto_cite(text, sources))
+    print(create_webhook())

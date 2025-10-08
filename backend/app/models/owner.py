@@ -84,10 +84,7 @@ class Owner(Base):
     session_ids = Column(JSON, nullable=False, default=list)
     
     # Settings
-    function_pref = Column(JSON, nullable=False, default=lambda: {
-        "ai_rewrite": True,
-        "redact": False
-    })
+    placeholder = Column(String(255), nullable=False, default="[CONTENT UNDER REVIEW]")
     ai_threshold_option = Column(Integer, nullable=False, default=60)
     low_tokens_option = Column(Boolean, nullable=False, default=True)
     tokens_threshold = Column(Integer, nullable=False, default=500)
@@ -106,6 +103,7 @@ class Owner(Base):
     
     # Relationships
     api_keys = relationship("ApiKey", back_populates="owner", cascade="all, delete-orphan")
+    webhooks = relationship("Webhook", back_populates="owner", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="owner")
     payments = relationship("Payment", back_populates="owner")
 
