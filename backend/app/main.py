@@ -30,7 +30,7 @@ from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, Password
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
-from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse
+from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse, WebhookResponse
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
@@ -1065,6 +1065,28 @@ async def get_webhooks(
         )
         for webhook in webhooks if webhooks
     ]
+    
+@app.get("/api/v1/webhooks/{webhook_id}", response_model=List[WebhookListResponse])
+async def get_webhook_by_id(
+    webhook_id: str,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Get webhook for an owner by ID.
+    """
+    
+    webhook = db.query(Webhook).filter(
+        Webhook.owner_id == owner.id,
+        Webhook.id == webhook_id
+    ).first()
+    
+    return WebhookResponse(
+        id=webhook.id,
+        owner_unique_id=webhook.owner_id,
+        name=webhook.name,
+        endpoint=webhook.endpoint
+    )
 
 @app.delete("/api/v1/webhooks/delete-webhook")
 async def delete_webhook(
@@ -1370,7 +1392,13 @@ async def upload_submission(
     if owner.current_tokens <= 0:
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
-    hmdl_uuid = f"hmdl-wk-{uuid.uuid4()}"
+    if submission_data.webhook_id:
+        webhook = db.query(Webhook).filter(
+            Webhook.owner_id == owner.id,
+            Webhook.id == submission_data.webhook_id
+        ).first()
+    
+    work_uuid = f"hmdl-wk-{uuid.uuid4()}"
     
     # Create submission record
     submission = Submission(
@@ -1382,14 +1410,15 @@ async def upload_submission(
         status=ProcessingStatus.PROCESSING,
         meets_requirements=False,
         action_needed=False,
-        work_id=hmdl_uuid
+        work_id=work_uuid,
+        webhook_id=submission_data.webhook_id
     )
     
     db.add(submission)
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, hmdl_uuid, "")
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, work_uuid, webhook.endpoint)
     
     return
 
@@ -1606,9 +1635,32 @@ async def edit_submission(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
     
+    if request.webhook_id:
+        webhook = db.query(Webhook).filter(
+            Webhook.owner_id == owner.id,
+            Webhook.id == request.webhook_id
+        ).first()
+    
     # Rescan for plagiarism
     if request.rescan:
-        background_tasks.add_task(process_submission, owner.id, submission.id, request.edit_text, submission.work_id)
+        background_tasks.add_task(process_submission, owner.id, submission.id, request.edit_text, submission.work_id, webhook.endpoint)
+    else:
+        try:
+            if request.webhook_id:
+                response = requests.post(
+                    webhook.endpoint,
+                    json={
+                        "status": 200,
+                        "message": "Webhook successfully received" if request.edit_text else "No webhook received",
+                        "work_id": submission.work_id,
+                        "text": submission.orig_text,
+                        "modified_text": request.edit_text
+                    },
+                    timeout=10
+                )
+                response.raise_for_status()
+        except Exception as e:
+            pass
         
     submission.edit_text = request.edit_text
     submission.edited = True

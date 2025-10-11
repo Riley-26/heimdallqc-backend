@@ -24,7 +24,7 @@ class SubmissionAuto(BaseModel):
 class SubmissionManual(SubmissionBase):
     """Fields required when manually uploading"""
     api_key_id: str
-    manual_upload: bool = True
+    webhook_id: Optional[str] = None
     
 class SubmissionDelete(BaseModel):
     """Fields for deleting a submission entry"""
@@ -35,6 +35,7 @@ class SubmissionEdit(BaseModel):
     submission_unique_id: str
     edit_text: str
     rescan: bool
+    webhook_id: Optional[str] = None
     
 # -- RESPONSE MODELS    
 
