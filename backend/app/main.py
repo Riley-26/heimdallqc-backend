@@ -1205,7 +1205,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
             db.commit()
         else:    
             # Delete if score is below threshold
-            if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
+            if ai_res["score"] == "N/A" or ai_res["score"] < owner.ai_threshold_option:
                 db.delete(submission)
             else:
                 submission.meets_requirements = True
@@ -1228,6 +1228,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
         # Call webhook, everything is good
         try:
             if webhook_url:
+                print(webhook_url)
                 response = requests.post(
                     webhook_url,
                     json={
@@ -1322,7 +1323,7 @@ async def create_submission(
         # External request - authenticate API key normally
         api_key_obj = await authenticate_api_key(api_key)
     
-    # Get owner's preferred modif function
+    # Get owner
     owner = db.query(Owner).filter( Owner.id == api_key_obj.owner_id ).first()
     if not owner:
         raise HTTPException(status_code=404, detail="Owner not found")
