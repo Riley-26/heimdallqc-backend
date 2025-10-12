@@ -1418,7 +1418,7 @@ async def upload_submission(
     db.commit()
     db.refresh(submission)
     
-    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, work_uuid, webhook.endpoint)
+    background_tasks.add_task(process_submission, owner.id, submission.id, submission_data.orig_text, work_uuid, webhook.endpoint if webhook else "")
     
     return
 

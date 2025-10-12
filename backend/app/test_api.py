@@ -164,6 +164,41 @@ if __name__ == "__main__":
         When constructing a trench, the excavated soil is piled up to form raised parapets on both the front and rear sides of the trench. Inside the trench, firing positions are established along a raised forward ledge known as a fire step, while duckboards are laid on the frequently muddy floor to ensure firm footing.
     """
     
+    l_plag = """
+    
+    """
+    l_ai = """
+        So I finally decided to deep clean my kitchen this weekend, and honestly, I'm kind of embarrassed by what I found. There were these weird sticky spots on the floor that I've apparently been stepping over for months without actually dealing with them. And don't even get me started on the back of the fridge – I pulled it out from the wall and there was this whole ecosystem back there. I'm talking dust, crumbs, and what might have been a petrified french fry from like two years ago.
+        The worst part was definitely the oven, though. I've been using it regularly but somehow convinced myself that the self-cleaning function was enough. Turns out it's not. There was this layer of burnt-on grease that I had to scrape off with one of those metal spatula things, and it took forever. My arm was actually sore the next day. I went through an entire roll of paper towels and probably used way too much cleaning spray, but at least it's done now.
+        The funny thing is, once I got started I couldn't stop. I ended up reorganizing all my cabinets too, throwing out spices that expired in 2019, and discovering I apparently own four cheese graters for some reason. I have no memory of buying four cheese graters. I live alone. Why would I need four? Anyway, my kitchen looks amazing now and I keep walking in there just to admire it. I'm sure this feeling will last about three days before everything gets messy again, but for now I'm going to enjoy it. Maybe I'll even cook something more ambitious than pasta for once.
+    """
+    l_mix_ai_plag = """
+        So I finally decided to deep clean my kitchen this weekend, and honestly, I'm kind of embarrassed by what I found. There were these weird sticky spots on the floor that I've apparently been stepping over for months without actually dealing with them. And don't even get me started on the back of the fridge – I pulled it out from the wall and there was this whole ecosystem back there. I'm talking dust, crumbs, and what might have been a petrified french fry from like two years ago.
+        The worst part was definitely the oven, though. I've been using it regularly but somehow convinced myself that the self-cleaning function was enough. 
+    """
+    l_mix_ai_human = """
+        So I finally decided to deep clean my kitchen this weekend, and honestly, I'm kind of embarrassed by what I found. There were these weird sticky spots on the floor that I've apparently been stepping over for months without actually dealing with them. And don't even get me started on the back of the fridge – I pulled it out from the wall and there was this whole ecosystem back there. I'm talking dust, crumbs, and what might have been a petrified french fry from like two years ago.
+        The worst part was definitely the oven, though. I've been using it regularly but somehow convinced myself that the self-cleaning function was enough. 
+    """
+    l_mix_plag_human = """
+    
+    """
+    l_multi_plag = """
+    
+    """
+    l_multi_ai = """
+    
+    """
+    
+    s_plag = ""
+    s_ai = "I've been thinking about getting a dog lately, but I'm honestly not sure if I'm ready for that kind of commitment. My apartment's pretty small, and I work long hours most days. Plus, I'd feel terrible leaving a puppy alone all the time. Maybe I should start with fostering first? That way I could see if it's actually doable before making a permanent decision. Or I could just get more houseplants instead."
+    s_mix_ai_plag = ""
+    s_mix_ai_human = ""
+    s_mix_plag_human = ""
+    s_multi_plag = ""
+    s_multi_ai = ""
+    
+    
     sources = [
         {
             "score": 100,
