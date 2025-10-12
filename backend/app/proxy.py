@@ -40,7 +40,6 @@ async def analyse(
             )
             response.raise_for_status()
         except Exception as e:
-            print(e)
             raise HTTPException(status_code=400, detail="An error occurred")
         
     return
