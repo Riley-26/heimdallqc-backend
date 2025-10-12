@@ -1242,7 +1242,10 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
                 )
                 response.raise_for_status()
         except Exception as e:
-            raise HTTPException(status_code=400, detail="Cannot send data to webhook")
+            return {
+                "status": 400,
+                "detail": "Cannot send data to webhook"
+            }
         
         return {
             "status": 200
@@ -1268,7 +1271,10 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
                 )
                 response.raise_for_status()
         except Exception as e:
-            raise HTTPException(status_code=400, detail="Cannot send data to webhook")
+            return {
+                "status": 400,
+                "detail": "Cannot send data to webhook"
+            }
 
         return {
             "status": 500
