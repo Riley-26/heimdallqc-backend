@@ -1186,7 +1186,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
         db.commit()
         # Plagiarism detected, send email
         print(plag_res)
-        if plag_res["score"] != "N/A" and calc_plag_score(plag_res["dist"]) >= PLAG_THRESHOLD:
+        if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
             """
             
             email_params: resend.Emails.sendParams = {
