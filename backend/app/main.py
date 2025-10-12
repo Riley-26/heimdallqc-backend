@@ -1392,6 +1392,7 @@ async def upload_submission(
     if owner.current_tokens <= 0:
         raise HTTPException(status_code=400, detail="No tokens remaining")
     
+    webhook = None
     if submission_data.webhook_id:
         webhook = db.query(Webhook).filter(
             Webhook.owner_id == owner.id,
