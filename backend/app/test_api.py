@@ -1,6 +1,8 @@
 import requests
 import json
 
+from .main import plag_analysis
+
 # Base URL for your API
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -165,8 +167,7 @@ if __name__ == "__main__":
     """
     
     l_plag = """
-        First off, we have been using these cleaners for a few months. I'm immunocompromised and have them use our products, buckets, and supplies to prevent flare ups from certain chemicals. I also have a clutter free home and take generally about an hour to make sure we have all the supplies out for the cleaners and to make sure they have the easiest job ever. Literally moving stuff and making sure that they won't have to move anything. So, in my opinion, this is a pretty easy home to clean. It's mainly light cleaning. Everything is laid out and provided for them. They don't have to bring anything in but their abled bodies.
-        So the last time they cleaned, we suspected that they could possibly be using toilet water to clean with, specifically the bathrooms. We provide them with rags, buckets, products etc. We never hear water running. The buckets are always bone dry. They also flush the toilet like 15 times in each bathroom. So we thought it was odd. We ask questions and they tell us what we want to hear, as we didn't want to accuse them. So we just went with it and monitored the situation.
+        I think the grossest thing I've ever encountered were fruit flies in a refrigerator. And I don't mean like a couple fruit flies. I'm talking HUNDREDS of them layered in the bottom of the fridge, little piles of them in the corners of the shelves and clumps in the doors. This was a WORKING refrigerator mind you. How did they even get in there??? And how do you continue to use a fridge with dead bugs in it?
     """
     l_ai = """
         So I finally decided to deep clean my kitchen this weekend, and honestly, I'm kind of embarrassed by what I found. There were these weird sticky spots on the floor that I've apparently been stepping over for months without actually dealing with them. And don't even get me started on the back of the fridge - I pulled it out from the wall and there was this whole ecosystem back there. I'm talking dust, crumbs, and what might have been a petrified french fry from like two years ago.
@@ -441,8 +442,8 @@ if __name__ == "__main__":
     ]
     
     #print(ai_analysis(reworded))
-    #print(plag_analysis(text))
+    print(plag_analysis(l_mix_plag_human, ""))
     #print(redact_text(text, sources))
     #print(ai_rewrite(text, [[313,1337]]))
     #print(auto_cite(text, sources))
-    print(create_webhook())
+    #print(create_webhook())

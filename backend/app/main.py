@@ -200,7 +200,7 @@ def process_text(text: str, placeholder: str, checked_state: bool = False):
 def calc_plag_score(plag_word_count: int):
     """Calculate normalised plagiarism score, based on plag word count"""
     min_threshold = 20
-    midpoint = 80
+    midpoint = 70
     steepness = 0.04
     
     score = 100 / (1 + math.exp(-steepness * (plag_word_count - midpoint)))
@@ -461,8 +461,6 @@ def plag_analysis(text: str, placeholder: str):
 
     if response["status"] == 200:
         score = calc_plag_score(response["result"]["totalPlagiarismWords"])
-        print(response)
-        print(score)
         if score >= PLAG_THRESHOLD:
             if response["result"]["sourceCounts"] > 0:
                 snippets = []
@@ -471,9 +469,7 @@ def plag_analysis(text: str, placeholder: str):
                     for i in response["sources"]:
                         if len(i["plagiarismFound"]) > 0:
                             snippets.append([i["plagiarismFound"][0]["startIndex"], i["plagiarismFound"][0]["endIndex"]])
-                            print(snippets)
                             if calc_plag_score(i["plagiarismWords"]) >= PLAG_THRESHOLD and i["canAccess"]:
-                                print(i["score"])
                                 saved_sources.append({
                                     "score": i["score"],
                                     "total_words": i["totalNumberOfWords"],
@@ -485,7 +481,7 @@ def plag_analysis(text: str, placeholder: str):
                         result["sources"] = saved_sources
                     
                 result["modified_text"] = remove_text(text, snippets, placeholder)
-    
+    print(score)
     return {
         "status": response["status"],
         "score": score if score else 0,
@@ -1189,7 +1185,8 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
             
         db.commit()
         # Plagiarism detected, send email
-        if plag_res["score"] != "N/A" and calc_plag_score(plag_res["score"]) >= PLAG_THRESHOLD:
+        print(plag_res)
+        if plag_res["score"] != "N/A" and calc_plag_score(plag_res["dist"]) >= PLAG_THRESHOLD:
             """
             
             email_params: resend.Emails.sendParams = {
@@ -1207,6 +1204,7 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
             
             db.commit()
         else:    
+            # Delete if score is below threshold
             if ai_res["score"] != "N/A" and ai_res["score"] < owner.ai_threshold_option:
                 db.delete(submission)
             else:
