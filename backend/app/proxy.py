@@ -38,7 +38,7 @@ async def analyse(
                     "Authorization": f"Bearer {api_key}"
                 }
             )
-            print(await response.json())
+            print(response.json())
             response.raise_for_status()
         except Exception as e:
             print(e)
