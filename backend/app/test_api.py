@@ -1,8 +1,6 @@
 import requests
 import json
 
-from .main import plag_analysis
-
 # Base URL for your API
 BASE_URL = "http://127.0.0.1:8000"
 
@@ -144,6 +142,11 @@ def test_get_verif_sites(domain):
         print(f"Error: {response.text}")
         return None
     
+def test_datetime():
+    from datetime import datetime, timezone
+    now = datetime.now(tz=timezone.utc)
+    print(now >= datetime.fromisoformat("2025-11-05T22:44:11.000Z"))
+
     
 if __name__ == "__main__":
     #test_create_owner()
@@ -442,8 +445,9 @@ if __name__ == "__main__":
     ]
     
     #print(ai_analysis(reworded))
-    print(plag_analysis(l_multi_plag, ""))
+    #print(plag_analysis(l_multi_plag, ""))
     #print(redact_text(text, sources))
     #print(ai_rewrite(text, [[313,1337]]))
     #print(auto_cite(text, sources))
     #print(create_webhook())
+    test_datetime()

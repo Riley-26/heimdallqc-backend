@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, Table, Foreig
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -167,8 +167,8 @@ class Owner(Base):
             
     def add_monthly_tokens(self):
         """Call this to reset tokens"""
-        now = datetime.now()
-        if self.verified_month_end and now >= self.verified_month_end:
+        now = datetime.now(tz=timezone.utc)
+        if self.verified_month_end and now >= datetime.fromisoformat(self.verified_month_end.replace('Z', '+00:00')):
             self.current_tokens = self.plan.get("tokens", 0)
             # Set next month end
             self.verified_month_end = self.verified_month_end + timedelta(days=30)
