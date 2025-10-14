@@ -24,7 +24,8 @@
         "@emotion/styled": "^11.14.0",
         "@mui/icons-material": "^7.1.0",
         "@mui/material": "^7.1.0",
-        "axios": "^1.4.0"
+        "axios": "^1.4.0",
+        "heimdallqc": "^1.0.0"
     },
     "devDependencies": {
         "@types/node": "^18.15.11",

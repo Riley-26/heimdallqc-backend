@@ -1,64 +1,44 @@
-import { useEffect, useRef, useState, useMemo } from "react"
-import { useHMDL } from "../hooks/useHMDL"
-import "./App.css"
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { HmdlClient, HmdlWidget } from 'heimdallqc';
 
-function App() {
-    const textareaRef = useRef(null)
-    const watermarkProps = {
-        id: 1,
-        plagResult: 40,
-        aiResult: 65,
+const App: React.FC = () => {
+    const hmdl = new HmdlClient({
+        apiKey:"CxVHrClHgVGwj7UAOHOCsyyPiUG4F8IiIw6jj23yWvc24VfG",
+        baseUrl:"yeah"
+    })
+
+    const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault()
+        const textarea = e.currentTarget.elements.namedItem('inputText') as HTMLTextAreaElement
+        if (textarea) {
+            if (!hmdl.hasConfirmed()) {
+                hmdl.setErrorPopup(true)
+                return
+            } else {
+                const analysis = hmdl.analyse(textarea.value)
+                console.log(analysis)
+            }
+        }
     }
 
-    const { HMDLWidget, widgetState, widgetActions, HMDLWatermark, isLoading, error } =
-        useHMDL({
-            apiKey: "dHsSwZjcIKRuRtqRB5jMOVZyU74BqIhu1BRXEtMFhDZM7YgU",
-            darkTheme: true,
-            initialOpen: true
-        })
-
-    // EVENT LISTENERS FOR ALL SUBMITS
-
     return (
-        <>
-            <div
-                className=""
-                style={{ display: "flex", flexDirection: "column" }}
-            >
-                <h1>HEIMDALL</h1>
+        <div style={{ display: "flex", flexDirection: "column", gap: "72px", justifyContent: "center", alignItems: "center" }}>
+            <form onSubmit={(e) => handleSubmit(e)}>
                 <textarea
-                    ref={textareaRef}
-                    style={{
-                        width: "800px",
-                        height: "300px",
-                        fontSize: "18px",
-                        resize: "vertical",
-                        padding: "8px",
-                        margin: "0 0 12px 0",
-                    }}
-                ></textarea>
-            </div>
-            <div>
-                { HMDLWatermark(watermarkProps) }
-            </div>
-            <div
-                style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                }}
-            >
-                { HMDLWidget() }
-            </div>
-            <button
-                onClick={() => {
-                    widgetActions.submit(`${textareaRef.current?.["value"]}`)
-                }}
-            >
-                SUBMIT
-            </button>
-        </>
+                    name="inputText"
+                    style={{ width: "500px", height: "200px" }}
+                />
+                <button type="submit">Submit</button>
+            </form>
+            <HmdlWidget 
+                key={hmdl.key}
+                client={hmdl}
+                theme={'dark'}
+                defaultExpanded={true}
+            />
+        </div>
     )
 }
 
-export default App
+export default App;
