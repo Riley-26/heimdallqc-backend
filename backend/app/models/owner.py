@@ -168,7 +168,12 @@ class Owner(Base):
     def add_monthly_tokens(self):
         """Call this to reset tokens"""
         now = datetime.now(tz=timezone.utc)
-        if self.verified_month_end and now >= datetime.fromisoformat(self.verified_month_end.replace('Z', '+00:00')):
+        if isinstance(self.verified_month_end, str):
+            month_end_dt = datetime.fromisoformat(self.verified_month_end.replace('Z', '+00:00'))
+        else:
+            month_end_dt = self.verified_month_end
+        
+        if now >= month_end_dt:
             self.current_tokens = self.plan.get("tokens", 0)
             # Set next month end
             self.verified_month_end = self.verified_month_end + timedelta(days=30)

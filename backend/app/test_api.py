@@ -147,6 +147,13 @@ def test_datetime():
     now = datetime.now(tz=timezone.utc)
     print(now >= datetime.fromisoformat("2025-11-05T22:44:11.000Z"))
 
+
+def test_type():
+    url = f"{BASE_URL}/api/v1/get_type"
+    
+    response = requests.get(url)
+    
+    print(response.json())
     
 if __name__ == "__main__":
     #test_create_owner()
@@ -450,4 +457,4 @@ if __name__ == "__main__":
     #print(ai_rewrite(text, [[313,1337]]))
     #print(auto_cite(text, sources))
     #print(create_webhook())
-    test_datetime()
+    test_type()

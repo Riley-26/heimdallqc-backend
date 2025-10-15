@@ -2283,7 +2283,24 @@ async def stripe_listener(
     
     return
 
+@app.get("/api/v1/get_type")
+async def get_type(db: Session = Depends(get_db)):
+    owner = db.query(Owner).filter(Owner.id == 4).first()
     
+    if isinstance(owner.verified_month_end, str):
+        month_end_dt = datetime.fromisoformat(owner.verified_month_end.replace('Z', '+00:00'))
+    else:
+        month_end_dt = owner.verified_month_end  # Already a datetime
+    
+    if datetime.now(tz=timezone.utc) >= month_end_dt:
+        print("now")
+    
+    print(owner.verified_month_end)
+    print(type(owner.verified_month_end))
+    print(datetime.now())
+    print(type(datetime.now()))
+    print(str(owner.verified_month_end))
+        
 if __name__ == "__main__":
     import uvicorn
     
