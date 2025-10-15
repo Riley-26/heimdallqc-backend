@@ -174,7 +174,7 @@ class Owner(Base):
             month_end_dt = self.verified_month_end
         
         if now >= month_end_dt:
-            self.current_tokens = self.plan.get("tokens", 0)
+            self.current_tokens += self.plan.get("tokens", 0)
             # Set next month end
             self.verified_month_end = self.verified_month_end + timedelta(days=30)
         
