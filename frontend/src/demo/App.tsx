@@ -1,11 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HmdlClient, HmdlWidget } from 'heimdallqc';
+import 'heimdallqc/dist/heimdallqc.css'
 
 const App: React.FC = () => {
     const hmdl = new HmdlClient({
-        apiKey:"CxVHrClHgVGwj7UAOHOCsyyPiUG4F8IiIw6jj23yWvc24VfG",
-        baseUrl:"yeah"
+        apiKey:"WW4bgYVtK9VqHDgN7b7rH6q1xSEqZBxB3ssgXCslKH2NYZwJ",
+        baseUrl:"https://webhook.site/a7aae2e5-3730-49c6-adfd-5046b5640782"
     })
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {

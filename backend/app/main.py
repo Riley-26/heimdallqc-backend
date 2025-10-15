@@ -2273,7 +2273,7 @@ async def stripe_listener(
     if event_type == "customer.subscription.deleted":
         owner = await get_current_owner(db, customer_id=data.get("data").get("object").get("customer"))
         
-        owner.change_plan("none")
+        owner.change_plan("none", trial_active=False)
         owner.verify_owner(cancelled=True)
         owner.subscription_id = ""
         owner.verified_month_end = None
@@ -2283,15 +2283,6 @@ async def stripe_listener(
     
     return
 
-
-@app.post("/yello")
-async def yelo(request: Request):
-    
-    print("yello: ")
-    data = await request.json()
-    print(data)
-    
-    return
     
 if __name__ == "__main__":
     import uvicorn
