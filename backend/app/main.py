@@ -329,11 +329,11 @@ def render_payment_conf_email(invoice_pdf: str, paid: str, name: str, base_url: 
         <div style="padding: 20px; font-family: Arial;">
           <h1 style="color: #111; font-size: 28px; margin-bottom: 16px;">Thank you for your payment!</h1>
           <p style="color: #333; font-size: 16px; margin-bottom: 24px;">To view your invoice, please click the link below or go to the "billing" section of your account.</p>
-          <div style="padding: 20px; background-color: #ddd; display: flex; flex-direction: column; gap: 12px;">
+          <div style="padding: 20px; background-color: #ddd; display: flex; gap: 12px;">
             <div style="padding: 20px; display: flex; justify-content: space-between;">
               <p style="color: #333; font-size: 16px;">{{ name }}</p>
             </div>
-            <div style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+            <div style="padding: 20px; display: flex; gap: 4px;">
               <p style="color: #333; font-size: 16px;">Total paid:</p>
               <p style="color: #333; font-size: 16px;">{{ paid }}</p>
             </div>
@@ -2283,23 +2283,6 @@ async def stripe_listener(
     
     return
 
-@app.get("/api/v1/get_type")
-async def get_type(db: Session = Depends(get_db)):
-    owner = db.query(Owner).filter(Owner.id == 4).first()
-    
-    if isinstance(owner.verified_month_end, str):
-        month_end_dt = datetime.fromisoformat(owner.verified_month_end.replace('Z', '+00:00'))
-    else:
-        month_end_dt = owner.verified_month_end  # Already a datetime
-    
-    if datetime.now(tz=timezone.utc) >= month_end_dt:
-        print("now")
-    
-    print(owner.verified_month_end)
-    print(type(owner.verified_month_end))
-    print(datetime.now())
-    print(type(datetime.now()))
-    print(str(owner.verified_month_end))
         
 if __name__ == "__main__":
     import uvicorn
