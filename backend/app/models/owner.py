@@ -14,23 +14,23 @@ plans_dict = {
         "price": 0
     },
     "Extrinsic": {
-        "id": "price_1RvgtBR9LI2BudDrjnZpax1X",
+        "id": "price_1SIXyjJqFq3aGYv0e0omowvY",
         "name": "extrinsic",
         "tokens": 8000,
         "price": 34
     },
-    "Intrinsic": {
-        "id": "price_1Rvh1DR9LI2BudDrp05uZgkV",
-        "name": "intrinsic",
-        "tokens": 6000,
-        "price": 26
-    },
-    "Combo": {
-        "id": "price_1Rvh1SR9LI2BudDrHW0tFWz9",
-        "name": "combo",
-        "tokens": 16500,
-        "price": 55
-    }
+    # "Intrinsic": {
+    #     "id": "price_1Rvh1DR9LI2BudDrp05uZgkV",
+    #     "name": "intrinsic",
+    #     "tokens": 6000,
+    #     "price": 26
+    # },
+    # "Combo": {
+    #     "id": "price_1Rvh1SR9LI2BudDrHW0tFWz9",
+    #     "name": "combo",
+    #     "tokens": 16500,
+    #     "price": 55
+    # }
 }
 
 class Tokens:
