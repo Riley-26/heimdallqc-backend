@@ -2071,7 +2071,7 @@ async def create_payment_session(
                         status_code=400,
                         detail="Price ID must be for recurring payments"
                     )
-            except stripe.error.InvalidRequestError:
+            except stripe.error:
                 raise HTTPException(
                     status_code=400,
                     detail="Invalid price ID"
@@ -2108,7 +2108,7 @@ async def create_payment_session(
                         status_code=400,
                         detail="Price ID must be for one-time payments"
                     )
-            except stripe.error.InvalidRequestError:
+            except stripe.error:
                 raise HTTPException(
                     status_code=400,
                     detail="Invalid price ID"
