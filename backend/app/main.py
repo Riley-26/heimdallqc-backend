@@ -26,7 +26,7 @@ from .models.submission import Submission, ProcessingStatus
 from .models.payment import Payment
 from .models.webhook import Webhook
 from .models.event import Event
-from .models.audit_profile import Audit_profile
+from .models.audit_profile import AuditProfile
 from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
@@ -1690,7 +1690,7 @@ async def create_audit_profile(
     Create audit profile for an owner.
     """
     # Generate new API key
-    audit_prof = Audit_profile(
+    audit_prof = AuditProfile(
         owner_id=owner.id,
         name=audit_prof_data.name,
         desc=audit_prof_data.desc,
@@ -1713,8 +1713,8 @@ async def get_audit_profiles(
     List all audit profiles for an owner.
     """
     
-    audit_profs = db.query(Audit_profile).filter(
-        Audit_profile.owner_id == owner.id
+    audit_profs = db.query(AuditProfile).filter(
+        AuditProfile.owner_id == owner.id
     ).all()
     if not audit_profs:
         raise HTTPException(
@@ -1741,9 +1741,9 @@ async def edit_audit_profile(
     """
     Edit an audit profile.
     """
-    audit_prof = db.query(Audit_profile).filter(
-        Audit_profile.id == audit_prof_data.audit_profile_id,
-        Audit_profile.owner_id == owner.id
+    audit_prof = db.query(AuditProfile).filter(
+        AuditProfile.id == audit_prof_data.audit_profile_id,
+        AuditProfile.owner_id == owner.id
     ).first()
     if not audit_prof:
         raise HTTPException(status_code=404, detail="Audit profile not found")
@@ -1766,9 +1766,9 @@ async def delete_audit_profile(
     """
     Delete an audit profile.
     """
-    audit_prof = db.query(Audit_profile).filter(
-        Audit_profile.id == audit_prof_data.audit_profile_id,
-        Audit_profile.owner_id == owner.id
+    audit_prof = db.query(AuditProfile).filter(
+        AuditProfile.id == audit_prof_data.audit_profile_id,
+        AuditProfile.owner_id == owner.id
     ).first()
     if not audit_prof:
         raise HTTPException(status_code=404, detail="Audit profile not found")
