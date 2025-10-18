@@ -106,6 +106,7 @@ class Owner(Base):
     webhooks = relationship("Webhook", back_populates="owner", cascade="all, delete-orphan")
     submissions = relationship("Submission", back_populates="owner")
     payments = relationship("Payment", back_populates="owner")
+    audit_profiles = relationship("AuditProfile", back_populates="owner")
 
     def __repr__(self):
         return f"<Owner(id={self.id}, email={self.email})>"

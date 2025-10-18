@@ -4,4 +4,4 @@ from .submission import Submission
 from .payment import Payment
 from .event import Event
 from .webhook import Webhook
-from .audit_profile import Audit_profile
+from .audit_profile import AuditProfile

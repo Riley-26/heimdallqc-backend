@@ -3,7 +3,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from ..db.database import Base
 
-class Audit_profile(Base):
+class AuditProfile(Base):
     __tablename__ = "audit_profiles"
     
     # Primary key
