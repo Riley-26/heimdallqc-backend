@@ -26,11 +26,13 @@ from .models.submission import Submission, ProcessingStatus
 from .models.payment import Payment
 from .models.webhook import Webhook
 from .models.event import Event
+from .models.audit_profile import Audit_profile
 from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
 from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse, WebhookResponse
+from .schemas.audit_profile import AuditProfileCreate, AuditProfileDelete, AuditProfileEdit, AuditProfileResponse, AuditProfileResponseBase
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
@@ -1676,6 +1678,105 @@ async def edit_submission(
     
     return
 
+# ---------- AUDIT ENDPOINTS ----------
+
+@app.post("/api/v1/audit-profiles/create-profile")
+async def create_audit_profile(
+    audit_prof_data: AuditProfileCreate,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Create audit profile for an owner.
+    """
+    # Generate new API key
+    audit_prof = Audit_profile(
+        owner_id=owner.id,
+        name=audit_prof_data.name,
+        desc=audit_prof_data.desc,
+        schedule=audit_prof_data.schedule,
+        pages=audit_prof_data.pages
+    )
+    
+    db.add(audit_prof)
+    db.commit()
+    db.refresh(audit_prof)
+    
+    return
+
+@app.get("/api/v1/audit-profiles/self", response_model=List[AuditProfileResponseBase])
+async def get_audit_profiles(
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    List all audit profiles for an owner.
+    """
+    
+    audit_profs = db.query(Audit_profile).filter(
+        Audit_profile.owner_id == owner.id
+    ).all()
+    if not audit_profs:
+        raise HTTPException(
+            status_code=400,
+            detail="Audit profile not found"
+        )
+    
+    return [
+        AuditProfileResponseBase(
+            id=audit_prof.id,
+            name=audit_prof.name,
+            pdf_link=audit_prof.pdf_link,
+            is_active=audit_prof.is_active
+        )
+        for audit_prof in audit_profs
+    ]
+
+@app.patch("/api/v1/audit-profiles/edit-profile")
+async def edit_audit_profile(
+    audit_prof_data: AuditProfileEdit,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Edit an audit profile.
+    """
+    audit_prof = db.query(Audit_profile).filter(
+        Audit_profile.id == audit_prof_data.audit_profile_id,
+        Audit_profile.owner_id == owner.id
+    ).first()
+    if not audit_prof:
+        raise HTTPException(status_code=404, detail="Audit profile not found")
+    
+    audit_prof.schedule = audit_prof_data.schedule
+    audit_prof.desc = audit_prof_data.desc if audit_prof_data.desc else ""
+    audit_prof.pages = audit_prof_data.pages
+    audit_prof.name = audit_prof_data.name
+    
+    db.commit()
+    
+    return
+
+@app.delete("/api/v1/audit-profiles/delete-profile")
+async def delete_audit_profile(
+    audit_prof_data: AuditProfileDelete,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete an audit profile.
+    """
+    audit_prof = db.query(Audit_profile).filter(
+        Audit_profile.id == audit_prof_data.audit_profile_id,
+        Audit_profile.owner_id == owner.id
+    ).first()
+    if not audit_prof:
+        raise HTTPException(status_code=404, detail="Audit profile not found")
+    
+    db.delete(audit_prof)
+    db.commit()
+    
+    return
 
 # ---------- LOG IN ENDPOINTS ----------
 
