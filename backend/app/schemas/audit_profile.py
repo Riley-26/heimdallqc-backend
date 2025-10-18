@@ -33,12 +33,12 @@ class AuditProfileResponseBase(BaseModel):
     """Base class for audit profile responses"""
     id: int
     name: str
+    desc: Optional[str] = None
     pdf_link: Optional[str] = None
     is_active: bool
     
 class AuditProfileResponse(AuditProfileResponseBase):
     """Main class for audit profile responses"""
     created_at: datetime
-    desc: Optional[str] = None
     pages: list
     schedule: dict

@@ -1726,6 +1726,7 @@ async def get_audit_profiles(
         AuditProfileResponseBase(
             id=audit_prof.id,
             name=audit_prof.name,
+            desc=audit_prof.desc,
             pdf_link=audit_prof.pdf_link,
             is_active=audit_prof.is_active
         )
