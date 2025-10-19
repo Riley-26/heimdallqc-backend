@@ -1704,7 +1704,7 @@ async def create_audit_profile(
     
     return
 
-@app.get("/api/v1/audit-profiles/self", response_model=List[AuditProfileResponseBase])
+@app.get("/api/v1/audit-profiles/self", response_model=List[AuditProfileResponse])
 async def get_audit_profiles(
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
