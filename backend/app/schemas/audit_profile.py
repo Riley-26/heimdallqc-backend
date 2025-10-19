@@ -19,6 +19,7 @@ class AuditProfileCreate(AuditProfileBase):
 class AuditProfileEdit(AuditProfileBase):
     """Edit an audit profile"""
     audit_profile_id: str
+    name: str
     desc: Optional[str] = None
     schedule: dict
     pages: list

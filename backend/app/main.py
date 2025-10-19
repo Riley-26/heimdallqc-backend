@@ -1747,10 +1747,10 @@ async def edit_audit_profile(
     if not audit_prof:
         raise HTTPException(status_code=404, detail="Audit profile not found")
     
-    audit_prof.schedule = audit_prof_data.schedule
-    audit_prof.desc = audit_prof_data.desc if audit_prof_data.desc else ""
-    audit_prof.pages = audit_prof_data.pages
     audit_prof.name = audit_prof_data.name
+    audit_prof.desc = audit_prof_data.desc if audit_prof_data.desc else ""
+    audit_prof.schedule = audit_prof_data.schedule
+    audit_prof.pages = audit_prof_data.pages
     
     db.commit()
     
