@@ -1716,11 +1716,6 @@ async def get_audit_profiles(
     audit_profs = db.query(AuditProfile).filter(
         AuditProfile.owner_id == owner.id
     ).all()
-    if not audit_profs:
-        raise HTTPException(
-            status_code=400,
-            detail="Audit profile not found"
-        )
     
     return [
         AuditProfileResponseBase(
@@ -1730,7 +1725,7 @@ async def get_audit_profiles(
             pdf_link=audit_prof.pdf_link,
             is_active=audit_prof.is_active
         )
-        for audit_prof in audit_profs
+        for audit_prof in audit_profs if audit_profs
     ]
 
 @app.patch("/api/v1/audit-profiles/edit-profile")
