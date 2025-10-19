@@ -1718,12 +1718,15 @@ async def get_audit_profiles(
     ).all()
     
     return [
-        AuditProfileResponseBase(
+        AuditProfileResponse(
             id=audit_prof.id,
             name=audit_prof.name,
             desc=audit_prof.desc,
             pdf_link=audit_prof.pdf_link,
-            is_active=audit_prof.is_active
+            is_active=audit_prof.is_active,
+            created_at=audit_prof.created_at,
+            pages=audit_prof.pages,
+            schedule=audit_prof.schedule
         )
         for audit_prof in audit_profs if audit_profs
     ]
