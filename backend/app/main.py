@@ -18,6 +18,9 @@ import stripe
 from jose import jwe
 import resend
 from jinja2 import Template
+import bcrypt
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .db.database import SessionLocal, get_db
 from .models.owner import Owner
@@ -133,10 +136,6 @@ def send_reset_email(email: str, reset_token: str):
 
 # ---------- PASSWORD HASHING ----------
 
-import bcrypt
-import jwt
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 security = HTTPBearer()
 
 def hash_password(password: str) -> str:
@@ -150,7 +149,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ---------- PROCESSING/HELPER FUNCTIONS ----------
 
-# Helper function to authenticate API key
+# -- API KEY AUTH
+
 async def authenticate_api_key(api_key: str) -> ApiKey:
     """Authenticate and return the API key object"""
     db = SessionLocal()
@@ -407,7 +407,7 @@ def render_no_tokens_email(bill_cycle: str, base_url: str):
     template = Template(html_template)
     return template.render(bill_cycle=bill_cycle, base_url=base_url)
 
-# ---------- ANALYSIS FUNCTIONS ----------
+# -- ANALYSIS
 
 def ai_analysis(text: str):
     winston_url = "https://api.gowinston.ai/v2/ai-content-detection"
@@ -529,6 +529,16 @@ def remove_text(text: str, snippets: list, placeholder: str):
         text_list[start:end] = list(placeholder)
     
     return ''.join(text_list)
+    
+# -- AUDIT
+    
+def run_audit(profile: AuditProfile):
+    
+    pass
+
+def stop_audit(profile: AuditProfile):
+    
+    pass
     
 # -- ANALYTICS
 
