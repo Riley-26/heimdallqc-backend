@@ -32,7 +32,7 @@ from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse,
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
 from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse, WebhookResponse
-from .schemas.audit_profile import AuditProfileCreate, AuditProfileDelete, AuditProfileEdit, AuditProfileResponse, AuditProfileResponseBase
+from .schemas.audit_profile import AuditProfileCreate, AuditProfileDelete, AuditProfileEdit, AuditProfileResponse, AuditProfileResponseBase, AuditToggle
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
@@ -172,7 +172,8 @@ async def authenticate_api_key(api_key: str) -> ApiKey:
     finally:
         db.close()
 
-# Text processing function
+# -- TEXT PROCESSING
+
 def process_text(text: str, placeholder: str, checked_state: bool = False):
     """
     Process the submitted text and determine if it meets requirements.
@@ -212,6 +213,8 @@ def calc_plag_score(plag_word_count: int):
         score = score * dampening
     
     return min(score//1, 100)
+
+# -- OWNER DATA
 
 async def get_current_owner(
     db: Session,
@@ -297,6 +300,8 @@ def validate_jwt(
         return owner
     except Exception as e:
         print(f"JWE Decryption Error: {e}")
+
+# -- EMAIL TEMPLATES
 
 def render_action_needed_email(base_url: str, work_id: str):
     html_template = """
@@ -404,7 +409,6 @@ def render_no_tokens_email(bill_cycle: str, base_url: str):
 
 # ---------- ANALYSIS FUNCTIONS ----------
 
-# -- AI ANALYSIS
 def ai_analysis(text: str):
     winston_url = "https://api.gowinston.ai/v2/ai-content-detection"
     key = os.getenv("WINST_KEY")
@@ -436,7 +440,6 @@ def ai_analysis(text: str):
         "tokens": response["credits_used"]
     }
 
-# -- PLAGIARISM ANALYSIS
 def plag_analysis(text: str, placeholder: str):
     winston_url = "https://api.gowinston.ai/v2/plagiarism"
     key = os.getenv("WINST_KEY")
@@ -492,7 +495,6 @@ def plag_analysis(text: str, placeholder: str):
         "tokens": response["credits_used"]
     }
 
-# -- REMOVAL
 def remove_text(text: str, snippets: list, placeholder: str):
     """Remove multiple snippets in the text, avoiding overlapping sections."""
 
@@ -532,11 +534,6 @@ def remove_text(text: str, snippets: list, placeholder: str):
 
 
 # ---------- OWNER ENDPOINTS ----------
-
-# PUBLIC: ANYONE CAN ACCESS
-# PRIVATE - KEY: NEEDS VALID API KEY TO ACCESS
-# PRIVATE - LOGIN: OWNER NEEDS TO BE LOGGED IN TO ACCESS
-# PRIVATE - JWT: ACCESSED VIA JWT
 
 @app.post("/api/v1/owners")
 async def create_owner(
@@ -633,7 +630,6 @@ async def get_owner_details(
         trial_used=owner.trial_used
     )
 
-# -- DEACTIVATE/DELETE OWNER
 @app.delete("/api/v1/owners/delete-account")
 async def delete_owner(
     request: OwnerDelete,
@@ -1773,6 +1769,30 @@ async def delete_audit_profile(
         raise HTTPException(status_code=404, detail="Audit profile not found")
     
     db.delete(audit_prof)
+    db.commit()
+    
+    return
+
+@app.patch("/api/v1/audit-profiles/toggle-audit")
+async def toggle_audit(
+    audit_run_data: AuditToggle,
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """Runs audit profile according to config, stops if already running"""
+    
+    audit_prof = db.query(AuditProfile).filter(
+        AuditProfile.id == audit_run_data.audit_profile_id,
+        AuditProfile.owner_id == owner.id
+    ).first()
+    if not audit_prof:
+        raise HTTPException(status_code=404, detail="Audit profile not found")
+    
+    # RUN AUDIT
+    if audit_prof.is_active: print("Audit stopped")
+    if not audit_prof.is_active: print("Audit running")
+    
+    audit_prof.is_active = audit_run_data.toggle_setting
     db.commit()
     
     return

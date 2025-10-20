@@ -28,6 +28,11 @@ class AuditProfileDelete(BaseModel):
     """Delete an audit profile"""
     audit_profile_id: str
     
+class AuditToggle(BaseModel):
+    """Switch audit from running to stopping, vice versa"""
+    audit_profile_id: str
+    toggle_setting: bool
+    
 # Response models
 
 class AuditProfileResponseBase(BaseModel):
