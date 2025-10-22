@@ -42,6 +42,7 @@ MARKUP_FACTOR = 15
 PAGE_LIMIT = 10
 TRIAL_LENGTH = 7
 PLAG_THRESHOLD = 40
+MIN_CHARS = 280
 # !!!!
 
 stripe.api_key = os.getenv("STRIPE_KEY")
@@ -495,6 +496,36 @@ def plag_analysis(text: str, placeholder: str):
         "tokens": response["credits_used"]
     }
 
+def audit_plag_analysis(pages: str, excluded_domain: str):
+    winston_url = "https://api.gowinston.ai/v2/plagiarism"
+    key = os.getenv("WINST_KEY")
+    
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
+    }
+    
+    for page in pages:
+        payload = {
+            "website": page,
+            "excluded_sources": [excluded_domain]
+        }
+        
+        response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
+        result = {}
+
+        if "status" not in response.keys() or "result" not in response.keys():
+            continue
+            
+        if response["status"] == 200:
+            score = calc_plag_score(response["result"]["totalPlagiarismWords"])
+            print(f"----- Page: {page} -----")
+            print("\n")
+            print(f"Score: {score}")
+            print("\n")
+            print(response)
+            print("\n")
+
 def remove_text(text: str, snippets: list, placeholder: str):
     """Remove multiple snippets in the text, avoiding overlapping sections."""
 
@@ -531,14 +562,91 @@ def remove_text(text: str, snippets: list, placeholder: str):
     return ''.join(text_list)
     
 # -- AUDIT
-    
-def run_audit(profile: AuditProfile):
-    
-    pass
 
-def stop_audit(profile: AuditProfile):
+from bs4 import BeautifulSoup
     
-    pass
+def run_audit(page: str):
+    try:
+        # Fetch the page
+        response = requests.get(
+            page,
+            headers={'User-Agent': 'HeimdallQCBot/1.0'},
+            timeout=10
+        )
+        response.raise_for_status()
+        
+        # Parse HTML
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Remove unwanted elements
+        for element in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'button']):
+            element.decompose()
+        
+        # Extract main content
+        main_content = (
+            soup.find('main') or 
+            soup.find('article') or 
+            soup.find(class_='content') or 
+            soup.find(id='content') or 
+            soup.find('body')
+        )
+        
+        if not main_content:
+            return {
+                'url': page,
+                'content': [],
+                'content_full': '',
+                'word_count': 0,
+                'block_count': 0,
+                'status': 'error',
+                'error': 'No main content found'
+            }
+        
+        # Extract text blocks (only split at block-level elements)
+        text_block_elements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'pre']
+        
+        blocks = []
+        for block in main_content.find_all(text_block_elements):
+            # Get text (inline elements like <strong> stay together)
+            text = block.get_text(separator=' ', strip=True)
+            if text and len(text) >= MIN_CHARS:
+                blocks.append(text)
+        
+        # Combine for full text
+        full_content = ' '.join(blocks)
+        
+        return {
+            'url': page,
+            'content': blocks,
+            'word_count': len(full_content.split()),
+            'block_count': len(blocks),
+            'status': 'success',
+            'error': None
+        }
+        
+    except requests.RequestException as e:
+        return {
+            'url': page,
+            'content': [],
+            'content_full': '',
+            'word_count': 0,
+            'block_count': 0,
+            'status': 'error',
+            'error': f'Failed to fetch page: {str(e)}'
+        }
+    except Exception as e:
+        return {
+            'url': page,
+            'content': [],
+            'content_full': '',
+            'word_count': 0,
+            'block_count': 0,
+            'status': 'error',
+            'error': f'Extraction error: {str(e)}'
+        }
+
+# -- CRON JOB
+
     
 # -- ANALYTICS
 
@@ -1799,8 +1907,10 @@ async def toggle_audit(
         raise HTTPException(status_code=404, detail="Audit profile not found")
     
     # RUN AUDIT
-    if audit_prof.is_active: print("Audit stopped")
-    if not audit_prof.is_active: print("Audit running")
+    if audit_run_data.toggle_setting:
+        audit_plag_analysis(audit_prof.pages, owner.domain)
+    if not audit_run_data.toggle_setting:
+        print("Audit stopped")
     
     audit_prof.is_active = audit_run_data.toggle_setting
     db.commit()

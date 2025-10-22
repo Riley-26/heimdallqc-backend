@@ -147,13 +147,17 @@ def test_datetime():
     now = datetime.now(tz=timezone.utc)
     print(now >= datetime.fromisoformat("2025-11-05T22:44:11.000Z"))
 
-
 def test_type():
     url = f"{BASE_URL}/api/v1/get_type"
     
     response = requests.get(url)
     
     print(response.json())
+    
+def test_audit_run():
+    from .main import run_audit
+    
+    run_audit()
     
 if __name__ == "__main__":
     #test_create_owner()
