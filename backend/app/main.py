@@ -128,13 +128,6 @@ def get_api_key_from_header(authorization: str = Header(None)) -> str:
     
     return api_key
 
-def send_reset_email(email: str, reset_token: str):
-    return {
-        "email": email,
-        "reset_token": reset_token,
-        "reset_link": f"http://localhost:3000/signin/reset-password?token={reset_token}"
-    }
-
 # ---------- PASSWORD HASHING ----------
 
 security = HTTPBearer()
