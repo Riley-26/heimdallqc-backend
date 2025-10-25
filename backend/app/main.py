@@ -30,12 +30,14 @@ from .models.payment import Payment
 from .models.webhook import Webhook
 from .models.event import Event
 from .models.audit_profile import AuditProfile
+from .models.audit_report import AuditReport
 from .schemas.owner import EmailPrefsUpdate, LoginRequest, OwnerDelete, PasswordReset, PasswordUpdate, OwnerCreate, SettingsUpdate, OwnerResponse, OwnerDetailResponse
 from .schemas.api_key import ApiKeyCreate, ApiKeyDeactivate, ApiKeyListResponse, ApiKeyReveal
 from .schemas.submission import SubmissionAuto, SubmissionCreated, SubmissionDelete, SubmissionEdit, SubmissionManual, SubmissionResponse, SubmissionDetailResponse
 from .schemas.payment import PaymentCreate, PaymentListResponse, PaymentMethodDelete, PaymentMethodListResponse, SubscriptionUpdate
 from .schemas.webhook import WebhookCreate, WebhookDelete, WebhookListResponse, WebhookResponse
 from .schemas.audit_profile import AuditProfileCreate, AuditProfileDelete, AuditProfileEdit, AuditProfileResponse, AuditProfileResponseBase, AuditToggle
+from .schemas.audit_report import AuditReportCreate, AuditReportDelete, AuditReportResponse, AuditReportResponseBase
 
 # !!!! DO NOT TOUCH
 MARKUP_FACTOR = 15
@@ -480,7 +482,7 @@ def plag_analysis(text: str, placeholder: str):
                         result["sources"] = saved_sources
                     
                 result["modified_text"] = remove_text(text, snippets, placeholder)
-    print(score)
+
     return {
         "status": response["status"],
         "score": score if score else 0,
@@ -489,7 +491,7 @@ def plag_analysis(text: str, placeholder: str):
         "tokens": response["credits_used"]
     }
 
-def audit_plag_analysis(pages: str, excluded_domain: str):
+def audit_plag_analysis(pages: list, excluded_domain: str):
     winston_url = "https://api.gowinston.ai/v2/plagiarism"
     key = os.getenv("WINST_KEY")
     
@@ -497,6 +499,8 @@ def audit_plag_analysis(pages: str, excluded_domain: str):
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
     }
+    
+    results = []
     
     for page in pages:
         payload = {
@@ -512,12 +516,35 @@ def audit_plag_analysis(pages: str, excluded_domain: str):
             
         if response["status"] == 200:
             score = calc_plag_score(response["result"]["totalPlagiarismWords"])
-            print(f"----- Page: {page} -----")
-            print("\n")
-            print(f"Score: {score}")
-            print("\n")
-            print(response)
-            print("\n")
+            if score >= PLAG_THRESHOLD:
+                if response["result"]["sourceCounts"] > 0:
+                    snippets = []
+                    if "sources" in response.keys() and len(response["sources"]) > 0:
+                        saved_sources = []
+                        for i in response["sources"]:
+                            if len(i["plagiarismFound"]) > 0:
+                                snippets.append([i["plagiarismFound"][0]["startIndex"], i["plagiarismFound"][0]["endIndex"]])
+                                if calc_plag_score(i["plagiarismWords"]) >= PLAG_THRESHOLD and i["canAccess"]:
+                                    saved_sources.append({
+                                        "score": i["score"],
+                                        "total_words": i["totalNumberOfWords"],
+                                        "plag_words": i["plagiarismWords"],
+                                        "url": i["url"],
+                                        "plag_found_start": i["plagiarismFound"][0]["startIndex"],
+                                        "plag_found_end": i["plagiarismFound"][0]["endIndex"]
+                                    })
+                            result["sources"] = saved_sources
+                            
+        results.append({
+            "page": page,
+            "status": response["status"],
+            "score": score if score else 0,
+            "dist": response["result"]["score"],
+            "result": result if result else {},
+            "tokens": response["credits_used"]
+        })
+        
+    return results
 
 def remove_text(text: str, snippets: list, placeholder: str):
     """Remove multiple snippets in the text, avoiding overlapping sections."""
@@ -555,90 +582,13 @@ def remove_text(text: str, snippets: list, placeholder: str):
     return ''.join(text_list)
     
 # -- AUDIT
-
-from bs4 import BeautifulSoup
     
-def run_audit(page: str):
-    try:
-        # Fetch the page
-        response = requests.get(
-            page,
-            headers={'User-Agent': 'HeimdallQCBot/1.0'},
-            timeout=10
-        )
-        response.raise_for_status()
-        
-        # Parse HTML
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Remove unwanted elements
-        for element in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'button']):
-            element.decompose()
-        
-        # Extract main content
-        main_content = (
-            soup.find('main') or 
-            soup.find('article') or 
-            soup.find(class_='content') or 
-            soup.find(id='content') or 
-            soup.find('body')
-        )
-        
-        if not main_content:
-            return {
-                'url': page,
-                'content': [],
-                'content_full': '',
-                'word_count': 0,
-                'block_count': 0,
-                'status': 'error',
-                'error': 'No main content found'
-            }
-        
-        # Extract text blocks (only split at block-level elements)
-        text_block_elements = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'pre']
-        
-        blocks = []
-        for block in main_content.find_all(text_block_elements):
-            # Get text (inline elements like <strong> stay together)
-            text = block.get_text(separator=' ', strip=True)
-            if text and len(text) >= MIN_CHARS:
-                blocks.append(text)
-        
-        # Combine for full text
-        full_content = ' '.join(blocks)
-        
-        return {
-            'url': page,
-            'content': blocks,
-            'word_count': len(full_content.split()),
-            'block_count': len(blocks),
-            'status': 'success',
-            'error': None
-        }
-        
-    except requests.RequestException as e:
-        return {
-            'url': page,
-            'content': [],
-            'content_full': '',
-            'word_count': 0,
-            'block_count': 0,
-            'status': 'error',
-            'error': f'Failed to fetch page: {str(e)}'
-        }
-    except Exception as e:
-        return {
-            'url': page,
-            'content': [],
-            'content_full': '',
-            'word_count': 0,
-            'block_count': 0,
-            'status': 'error',
-            'error': f'Extraction error: {str(e)}'
-        }
+def run_audit(pages: list, excluded_domain: str):
+    result = audit_plag_analysis(pages, excluded_domain)
+    print(result)
 
 # -- CRON JOB
+
 
     
 # -- ANALYTICS
@@ -1829,7 +1779,6 @@ async def get_audit_profiles(
             id=audit_prof.id,
             name=audit_prof.name,
             desc=audit_prof.desc,
-            pdf_link=audit_prof.pdf_link,
             is_active=audit_prof.is_active,
             created_at=audit_prof.created_at,
             pages=audit_prof.pages,
@@ -1901,7 +1850,7 @@ async def toggle_audit(
     
     # RUN AUDIT
     if audit_run_data.toggle_setting:
-        audit_plag_analysis(audit_prof.pages, owner.domain)
+        run_audit(audit_prof.pages, owner.domain)
     if not audit_run_data.toggle_setting:
         print("Audit stopped")
     
@@ -1909,6 +1858,32 @@ async def toggle_audit(
     db.commit()
     
     return
+
+@app.get("/api/v1/audit-reports/self", response_model=List[AuditReportResponse])
+async def get_audit_reports(
+    owner: Owner = Depends(validate_jwt),
+    db: Session = Depends(get_db)
+):
+    """
+    List all audit profiles for an owner.
+    """
+    
+    audit_reports = db.query(AuditReport).filter(
+        AuditReport.owner_id == owner.id
+    ).all()
+    
+    return [
+        AuditReportResponse(
+            id=audit_report.id,
+            name=audit_report.name,
+            desc=audit_report.desc,
+            is_active=audit_report.is_active,
+            created_at=audit_report.created_at,
+            pages=audit_report.pages,
+            schedule=audit_report.schedule
+        )
+        for audit_report in audit_reports if audit_reports
+    ]
 
 # ---------- LOG IN ENDPOINTS ----------
 

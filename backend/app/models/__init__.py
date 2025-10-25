@@ -5,3 +5,4 @@ from .payment import Payment
 from .event import Event
 from .webhook import Webhook
 from .audit_profile import AuditProfile
+from .audit_report import AuditReport

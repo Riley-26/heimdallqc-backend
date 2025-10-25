@@ -15,10 +15,9 @@ class AuditProfile(Base):
     # Config
     name = Column(String(255), nullable=False)
     desc = Column(Text, nullable=True)
-    pages = Column(JSON, nullable=False, default="{}")
-    schedule = Column(JSON, nullable=False, default=list)
+    pages = Column(JSON, nullable=False, default=list)
+    schedule = Column(JSON, nullable=False, default=dict)
     
-    pdf_link = Column(String(255), nullable=True)
     is_active = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

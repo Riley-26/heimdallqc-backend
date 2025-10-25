@@ -40,7 +40,6 @@ class AuditProfileResponseBase(BaseModel):
     id: int
     name: str
     desc: Optional[str] = None
-    pdf_link: Optional[str] = None
     is_active: bool
     
 class AuditProfileResponse(AuditProfileResponseBase):
