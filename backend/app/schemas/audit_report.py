@@ -6,10 +6,10 @@ from pydantic import BaseModel
 
 class AuditReportCreate(BaseModel):
     """Create an audit report"""
-    audit_profile_id: str
+    name: str
     score: int
     status: str
-    result: dict
+    results: list
     pages: list
     frequency: str
     day: Optional[str] = None
@@ -17,7 +17,7 @@ class AuditReportCreate(BaseModel):
 
 class AuditReportDelete(BaseModel):
     """Delete an audit report"""
-    audit_profile_id: str
+    id: str
     
 # Response models
 
@@ -26,11 +26,12 @@ class AuditReportResponseBase(BaseModel):
     id: int
     score: int
     status: str
+    name: str
     
 class AuditReportResponse(AuditReportResponseBase):
     """Main class for audit report responses"""
     owner_id: int
-    audit_profile_id: int
+    results: list
     pages: list
     frequency: str
     day: Optional[str]

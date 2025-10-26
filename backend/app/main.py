@@ -469,15 +469,22 @@ def plag_analysis(text: str, placeholder: str):
                     saved_sources = []
                     for i in response["sources"]:
                         if len(i["plagiarismFound"]) > 0:
-                            snippets.append([i["plagiarismFound"][0]["startIndex"], i["plagiarismFound"][0]["endIndex"]])
                             if calc_plag_score(i["plagiarismWords"]) >= PLAG_THRESHOLD and i["canAccess"]:
+                                plags_found = []
+                                for pf in i["plagiarismFound"]:
+                                    snippets.append([pf["startIndex"], pf["endIndex"]])
+                                    plags_found.append(
+                                        {
+                                            "startIndex": pf["startIndex"],
+                                            "endIndex": pf["endIndex"]
+                                        }
+                                    )
                                 saved_sources.append({
                                     "score": i["score"],
                                     "total_words": i["totalNumberOfWords"],
                                     "plag_words": i["plagiarismWords"],
                                     "url": i["url"],
-                                    "plag_found_start": i["plagiarismFound"][0]["startIndex"],
-                                    "plag_found_end": i["plagiarismFound"][0]["endIndex"]
+                                    "plags_found": plags_found
                                 })
                         result["sources"] = saved_sources
                     
@@ -501,16 +508,16 @@ def audit_plag_analysis(pages: list, excluded_domain: str):
     }
     
     results = []
+    score = 0
     
     for page in pages:
         payload = {
             "website": page,
             "excluded_sources": [excluded_domain]
         }
-        
+    
         response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
         result = {}
-
         if "status" not in response.keys() or "result" not in response.keys():
             continue
             
@@ -518,26 +525,30 @@ def audit_plag_analysis(pages: list, excluded_domain: str):
             score = calc_plag_score(response["result"]["totalPlagiarismWords"])
             if score >= PLAG_THRESHOLD:
                 if response["result"]["sourceCounts"] > 0:
-                    snippets = []
                     if "sources" in response.keys() and len(response["sources"]) > 0:
                         saved_sources = []
                         for i in response["sources"]:
                             if len(i["plagiarismFound"]) > 0:
-                                snippets.append([i["plagiarismFound"][0]["startIndex"], i["plagiarismFound"][0]["endIndex"]])
                                 if calc_plag_score(i["plagiarismWords"]) >= PLAG_THRESHOLD and i["canAccess"]:
+                                    plags_found = []
+                                    for pf in i["plagiarismFound"]:
+                                        plags_found.append(
+                                            {
+                                                "startIndex": pf["startIndex"],
+                                                "endIndex": pf["endIndex"]
+                                            }
+                                        )
                                     saved_sources.append({
                                         "score": i["score"],
                                         "total_words": i["totalNumberOfWords"],
                                         "plag_words": i["plagiarismWords"],
                                         "url": i["url"],
-                                        "plag_found_start": i["plagiarismFound"][0]["startIndex"],
-                                        "plag_found_end": i["plagiarismFound"][0]["endIndex"]
+                                        "plags_found": plags_found
                                     })
                             result["sources"] = saved_sources
                             
         results.append({
             "page": page,
-            "status": response["status"],
             "score": score if score else 0,
             "dist": response["result"]["score"],
             "result": result if result else {},
@@ -583,14 +594,37 @@ def remove_text(text: str, snippets: list, placeholder: str):
     
 # -- AUDIT
     
-def run_audit(pages: list, excluded_domain: str):
-    result = audit_plag_analysis(pages, excluded_domain)
-    print(result)
+def run_audit(pages: list, excluded_domain: str, db, profile, owner):
+    results = audit_plag_analysis(pages, excluded_domain)
+    if not results:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to audit pages"
+        )
 
-# -- CRON JOB
-
-
+    avg_score = sum(r["score"] for r in results) / len(results) if len(results) != 0 else 0
     
+    report = AuditReport(
+        name=profile.name,
+        owner_id=owner.id,
+        score=avg_score,
+        status="success",
+        results=results,
+        pages=pages,
+        frequency=profile.schedule["freq"],
+        day=profile.schedule["day"] if profile.schedule["day"] else None,
+        time=profile.schedule["time"] if profile.schedule["time"] else None,
+        pdf_link=""
+    )
+    
+    print(results)
+    
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    
+    return
+
 # -- ANALYTICS
 
 
@@ -1850,7 +1884,7 @@ async def toggle_audit(
     
     # RUN AUDIT
     if audit_run_data.toggle_setting:
-        run_audit(audit_prof.pages, owner.domain)
+        run_audit(audit_prof.pages, owner.domain, db, audit_prof, owner)
     if not audit_run_data.toggle_setting:
         print("Audit stopped")
     
@@ -1875,12 +1909,17 @@ async def get_audit_reports(
     return [
         AuditReportResponse(
             id=audit_report.id,
+            score=audit_report.score,
+            status=audit_report.status,
             name=audit_report.name,
-            desc=audit_report.desc,
-            is_active=audit_report.is_active,
-            created_at=audit_report.created_at,
+            owner_id=audit_report.owner_id,
+            results=audit_report.results,
             pages=audit_report.pages,
-            schedule=audit_report.schedule
+            frequency=audit_report.frequency,
+            day=audit_report.day,
+            time=audit_report.time,
+            pdf_link=audit_report.pdf_link,
+            created_at=audit_report.created_at
         )
         for audit_report in audit_reports if audit_reports
     ]

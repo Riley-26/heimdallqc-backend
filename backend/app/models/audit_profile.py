@@ -23,7 +23,6 @@ class AuditProfile(Base):
     
     # Relationships
     owner = relationship("Owner", back_populates="audit_profiles")
-    audit_reports = relationship("AuditReport", back_populates="audit_profiles")
     
     def __repr__(self):
         return f"<AuditProfile(id={self.id}, name={self.name}, owner_id={self.owner_id})>"

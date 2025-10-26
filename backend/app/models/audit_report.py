@@ -63,14 +63,14 @@ class AuditReport(Base):
     
     # Foreign key
     owner_id = Column(Integer, ForeignKey("owners.id"), nullable=False, index=True)
-    audit_profile_id = Column(Integer, ForeignKey("audit_profiles.id"), nullable=False, index=True)
     
     # Results
     score = Column(Integer, nullable=False)
     status = Column(String(50), default="pending", index=True)
-    result = Column(JSON, nullable=True, default=dict)
+    results = Column(JSON, nullable=True, default=list)
     
     # Config
+    name = Column(String, nullable=False)
     pages = Column(JSON, nullable=False, default=list)
     frequency = Column(String, nullable=False)
     day = Column(String, nullable=True)
@@ -81,7 +81,6 @@ class AuditReport(Base):
     
     # Relationships
     owner = relationship("Owner", back_populates="audit_reports")
-    audit_profiles = relationship("AuditProfile", back_populates="audit_reports")
     
     def __repr__(self):
         return f"<AuditReport(id={self.id}, name={self.name}, owner_id={self.owner_id})>"
