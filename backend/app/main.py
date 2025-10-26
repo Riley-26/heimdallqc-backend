@@ -647,8 +647,7 @@ async def create_owner(
         email=request.email,
         domain=request.domain,
         password_hash=hash_password(request.password),
-        name=request.name,
-        company=request.company
+        name=request.name
     )
     
     db.add(owner)

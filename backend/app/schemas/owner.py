@@ -33,7 +33,6 @@ class OwnerCreate(BaseModel):
     name: str
     password: str = Field(..., min_length=8)
     domain: str
-    company: Optional[str] = None
 
     @field_validator('password')
     def validate_password(cls, v):
@@ -45,7 +44,6 @@ class OwnerUpdate(BaseModel):
     """Fields that can be updated"""
     name: Optional[str] = None
     domain: Optional[str] = None
-    company: Optional[str] = None
     
 class OwnerDelete(BaseModel):
     """Delete owner data"""
@@ -95,7 +93,6 @@ class OwnerBase(BaseModel):
     email: EmailStr
     name: str
     domain: str
-    company: Optional[str] = None
     is_active: bool
     is_verified: bool
     cancelled_plan: bool
