@@ -603,26 +603,34 @@ def run_audit(pages: list, excluded_domain: str, db, profile, owner):
         )
 
     avg_score = sum(r["score"] for r in results) / len(results) if len(results) != 0 else 0
-    
+
+    plagiarism_count = 0
+    for val in results:
+        sources = val.get("result", {}).get("sources", [])
+        if sources:
+            for source in sources:
+                plagiarism_count += len(source.get("plags_found", []))
+
     report = AuditReport(
         name=profile.name,
         owner_id=owner.id,
         score=avg_score,
+        plagiarism_count=plagiarism_count,
         status="success",
         results=results,
         pages=pages,
-        frequency=profile.schedule["freq"],
-        day=profile.schedule["day"] if profile.schedule["day"] else None,
-        time=profile.schedule["time"] if profile.schedule["time"] else None,
+        frequency=profile.schedule.get("freq"),
+        day=profile.schedule.get("day"),
+        time=profile.schedule.get("time"),
         pdf_link=""
     )
-    
+
     print(results)
-    
+
     db.add(report)
     db.commit()
     db.refresh(report)
-    
+
     return
 
 # -- ANALYTICS

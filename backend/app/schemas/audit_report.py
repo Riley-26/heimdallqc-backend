@@ -31,6 +31,7 @@ class AuditReportResponseBase(BaseModel):
 class AuditReportResponse(AuditReportResponseBase):
     """Main class for audit report responses"""
     owner_id: int
+    plagiarism_count: int
     results: list
     pages: list
     frequency: str

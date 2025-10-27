@@ -68,6 +68,7 @@ class AuditReport(Base):
     score = Column(Integer, nullable=False)
     status = Column(String(50), default="pending", index=True)
     results = Column(JSON, nullable=True, default=list)
+    plagiarism_count = Column(Integer, nullable=True)
     
     # Config
     name = Column(String, nullable=False)
