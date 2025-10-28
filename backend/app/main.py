@@ -1918,6 +1918,7 @@ async def get_audit_reports(
             id=audit_report.id,
             score=audit_report.score,
             status=audit_report.status,
+            plagiarism_count=audit_report.plagiarism_count,
             name=audit_report.name,
             owner_id=audit_report.owner_id,
             results=audit_report.results,
