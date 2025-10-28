@@ -517,6 +517,7 @@ def audit_plag_analysis(pages: list, excluded_domain: str):
         }
     
         response = json.loads(requests.request("POST", winston_url, json=payload, headers=headers).text)
+        print(response)
         result = {}
         if "status" not in response.keys() or "result" not in response.keys():
             continue
@@ -594,7 +595,16 @@ def remove_text(text: str, snippets: list, placeholder: str):
     
 # -- AUDIT
     
-def run_audit(pages: list, excluded_domain: str, db, profile, owner):
+def run_audit(pages: list, excluded_domain: str, profile_id, owner_id):
+    db = SessionLocal()
+    
+    profile = db.query(AuditProfile).filter(
+        AuditProfile.id == profile_id,
+        AuditProfile.owner_id == owner_id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Audit profile not found")
+    
     results = audit_plag_analysis(pages, excluded_domain)
     if not results:
         raise HTTPException(
@@ -613,7 +623,7 @@ def run_audit(pages: list, excluded_domain: str, db, profile, owner):
 
     report = AuditReport(
         name=profile.name,
-        owner_id=owner.id,
+        owner_id=owner_id,
         score=avg_score,
         plagiarism_count=plagiarism_count,
         status="success",
@@ -629,7 +639,6 @@ def run_audit(pages: list, excluded_domain: str, db, profile, owner):
 
     db.add(report)
     db.commit()
-    db.refresh(report)
 
     return
 
@@ -1285,7 +1294,6 @@ def process_submission(owner_id, submission_id, text, work_id, webhook_url="", q
             
         db.commit()
         # Plagiarism detected, send email
-        print(plag_res)
         if plag_res["score"] != "N/A" and plag_res["score"] >= PLAG_THRESHOLD:
             """
             
@@ -1877,6 +1885,7 @@ async def delete_audit_profile(
 @app.patch("/api/v1/audit-profiles/toggle-audit")
 async def toggle_audit(
     audit_run_data: AuditToggle,
+    background_tasks: BackgroundTasks,
     owner: Owner = Depends(validate_jwt),
     db: Session = Depends(get_db)
 ):
@@ -1891,7 +1900,7 @@ async def toggle_audit(
     
     # RUN AUDIT
     if audit_run_data.toggle_setting:
-        run_audit(audit_prof.pages, owner.domain, db, audit_prof, owner)
+        background_tasks.add_task(run_audit, audit_prof.pages, owner.domain, audit_prof.id, owner.id)
     if not audit_run_data.toggle_setting:
         print("Audit stopped")
     
