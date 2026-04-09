@@ -15,18 +15,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-lib-cov
-coverage
-*.lcov
-.nyc_output
-
 # node_modules for all directories
 node_modules/
 **/node_modules/
@@ -44,98 +32,14 @@ __pycache__/
 *$py.class
 *.so
 backend/.env
+backend/app/test_api.py
+backend/app/webhook_test.py
 
 # Distribution / packaging
 .Python
 build/
-develop-eggs/
 dist/
 downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff (if you add Django later):
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff (if you add Flask later):
-instance/
-.webassets-cache
-
-# Scrapy stuff (if you add Scrapy later):
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# Poetry
-poetry.lock
-
-# PEP 582 - used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
 
 # Environments
 .env
@@ -143,26 +47,6 @@ celerybeat.pid
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
 
 # Database files
 *.sqlite3
@@ -181,66 +65,12 @@ backend/alembic/versions/*.py
 .docker/
 docker-compose.override.yml
 
-# IDE and editors
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-*.sublime-project
-.atom/
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
 # Temporary files
 *.tmp
 *.temp
 .tmp/
 temp/
 
-# Editor backup files
-*~
-.#*
-#*#
-
-# Package lock files (uncomment if you want to ignore them)
-# package-lock.json
-# yarn.lock
-
 # Local configuration overrides
 config.local.json
 settings.local.json
-
-# Backup files
-*.bak
-*.backup
-
-# Test files
-test-results/
-screenshots/
-
-# Development files
-*.local
-.local
-
-# Build artifacts specific to this project
-widget-hook.js
-widget-hook.esm.js
-widget-hook.d.ts
-styles.css
-
-# Optional: ignore TypeScript build info
-*.tsbuildinfo
