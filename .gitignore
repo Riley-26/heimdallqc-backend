@@ -25,6 +25,8 @@ frontend/build/
 frontend/.cache/
 frontend/coverage/
 frontend/.vite/
+frontend/src/demo/
+**/frontend/src/demo/
 
 # Backend Python files
 __pycache__/
